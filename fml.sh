@@ -2,12 +2,7 @@
 CONFIG=${FML_CONFIG:-~/fml/fml_config.json}
 
 
-# params are config name, e.g. sling, and variable name, e.g. "directory"
-function ml_conf_var()
-{
-  # jq -r returns the values without quotes
-  cat $FML_CONFIG | jq -r ".$1.$2"
-}
+
 
 function psgm()
 {
@@ -27,6 +22,13 @@ function psgms()
 
 # fml functions start here
 
+# params are config name, e.g. customer1, and variable name, e.g. "directory"
+function fml_conf_var()
+{
+  # jq -r returns the values without quotes
+  cat $CONFIG | jq -r ".$1.$2"
+}
+
 function fml_list()
 {
   echo "cluster alias, subdirectory (under mlaunchdata)"
@@ -34,7 +36,7 @@ function fml_list()
   DIRS=`psgm | grep dbpath | awk '{ split($14, p, "/"); print p[5] }' | uniq | sort`
   for DIR in $DIRS
   do
-    NAME=$(cat $FML_CONFIG | jq -r "to_entries[] | select(.value.directory == \"mlaunchdata/$(echo $DIR)\") | .key")
+    NAME=$(cat $CONFIG | jq -r "to_entries[] | select(.value.directory == \"mlaunchdata/$(echo $DIR)\") | .key")
     echo "$NAME, $DIR" 
   done
   echo ""
@@ -42,10 +44,10 @@ function fml_list()
 
 function fml_init()
 {
-  local INIT_ARGS=$(ml_conf_var $1 initArgs)
-  local DIR=$(ml_conf_var $1 directory)
-  local MONGO_VER=$(ml_conf_var $1 mongoVersion)
-  local START_PORT=$(ml_conf_var $1 startPort)
+  local INIT_ARGS=$(fml_conf_var $1 initArgs)
+  local DIR=$(fml_conf_var $1 directory)
+  local MONGO_VER=$(fml_conf_var $1 mongoVersion)
+  local START_PORT=$(fml_conf_var $1 startPort)
   # suppress confirmation prompt in m
   export M_CONFIRM=0
   # install specified version of MongoDB with m
@@ -55,18 +57,18 @@ function fml_init()
 
 function fml_start()
 {
-  mlaunch start --dir "$(ml_conf_var $1 directory)"
+  mlaunch start --dir "$(fml_conf_var $1 directory)"
 }
 
 function fml_stop()
 {
-  mlaunch stop --dir "$(ml_conf_var $1 directory)"
+  mlaunch stop --dir "$(fml_conf_var $1 directory)"
 }
 
 # param is cluster alias, e.g. myproject
 function fml_delete_dir()
 {
-  rm -rf $(ml_conf_var $1 directory) 
+  rm -rf $(fml_conf_var $1 directory) 
 }
 
 function fml_cleanup()
@@ -86,14 +88,14 @@ function fml_sh()
 {
   local alias1="$1"
   shift 1
-  mongosh "$(ml_conf_var $alias1 connectionString)" "$@"
+  mongosh "$(fml_conf_var $alias1 connectionString)" "$@"
 }
 
 function fml_oldsh()
 {
   local alias1="$1"
   shift 1
-  mongo "$(ml_conf_var $alias1 connectionString)" "$@"
+  mongo "$(fml_conf_var $alias1 connectionString)" "$@"
 }
 
 function fml_eval()
@@ -101,7 +103,7 @@ function fml_eval()
   local alias1="$1"
   local ev="$2"
   shift 2
-  local conn="$(ml_conf_var $alias1 connectionString)"
+  local conn="$(fml_conf_var $alias1 connectionString)"
   mongosh --quiet --norc --eval "$ev" $conn "$@"
 }
 
@@ -109,25 +111,23 @@ function fml_dump()
 {
   local alias1="$1"
   shift
-  mongodump "$(ml_conf_var $alias1 connectionString)" "$@"
+  mongodump "$(fml_conf_var $alias1 connectionString)" "$@"
 }
 
 function fml_restore()
 {
   local alias1="$1"
   shift 1
-  mongorestore "$(ml_conf_var $alias1 connectionString)" "$@"
+  mongorestore "$(fml_conf_var $alias1 connectionString)" "$@"
 }
-
-
 
 function fml_dump_restore()
 {
   local alias0="$1"
   local alias1="$2"
   dumpdir=$(mktemp -d 2>/dev/null || mktemp -d -t 'dump_')
-  mongodump "$(ml_conf_var $alias0 connectionString)" --out="$dumpdir"
-  mongorestore "$(ml_conf_var $alias1 connectionString)" --dir="$dumpdir"
+  mongodump "$(fml_conf_var $alias0 connectionString)" --out="$dumpdir"
+  mongorestore "$(fml_conf_var $alias1 connectionString)" --dir="$dumpdir"
   rm -rf $dumpdir
 }
 
@@ -135,7 +135,7 @@ function fml_restore()
 {
   local alias1="$1"
   shift 1
-  mongorestore "$(ml_conf_var $alias1 connectionString)" "$@"
+  mongorestore "$(fml_conf_var $alias1 connectionString)" "$@"
 }
 
 function fml_config()
@@ -149,8 +149,8 @@ function fml_sync()
   local alias1="$2"
   shift 2
   
-  local connstr0="$(ml_conf_var $alias0 connectionString)"
-  local connstr1="$(ml_conf_var $alias1 connectionString)"
+  local connstr0="$(fml_conf_var $alias0 connectionString)"
+  local connstr1="$(fml_conf_var $alias1 connectionString)"
   
   local logfile="mongosync_log_${alias0}_${alias1}.log"
   rm -rf $logfile
