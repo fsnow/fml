@@ -186,8 +186,9 @@ function fml_sync()
   shift 1
 
   mongosync $extra_msync_args --cluster0 "$connstr0" --cluster1 "$connstr1" "$@" >$logfile 2>&1 &
-  msync_pid=$!
+  msync_pid=$(psmsync | grep "$connstr0" | awk '{ print $2; }')
   echo "Started mongosync with pid $msync_pid"
+
   msync_wait_until '.progress.state=="IDLE"'
   msync_start "$extra_start_json"
   msync_wait_until '.progress.state=="RUNNING" and .progress.info=="change event application"'
@@ -367,6 +368,11 @@ function killmongod()
 function killmongo() 
 {
   kill -9 `psgm | awk '{ print $2; }'`
+}
+
+function psmsync()
+{
+  ps -ef | grep mongosync-macos | grep -v grep
 }
 
 function killmongosync() 
