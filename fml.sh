@@ -107,6 +107,15 @@ function fml_eval()
   mongosh --quiet --norc --eval "$ev" $conn "$@"
 }
 
+function fml_oldeval()
+{
+  local alias1="$1"
+  local ev="$2"
+  shift 2
+  local conn="$(fml_conf_var $alias1 connectionString)"
+  mongo --quiet --norc --eval "$ev" $conn "$@"
+}
+
 function fml_dump()
 {
   local alias1="$1"
@@ -236,6 +245,8 @@ function fml_help()
   echo "      Evals a command in the mongosh shell."
   echo "      Example:"
   echo "      fml eval myalias 'db.version'"
+  echo "  oldeval <alias> <command to eval>                   "
+  echo "      Evals a command in the mongo shell."
   echo "  dump <alias>               "
   echo "      Calls mongodump with no parameters except the connection string"
   echo "  restore <alias> <dbName> <gz file or directory>                "
@@ -290,6 +301,9 @@ function fml()
   elif [ $cmd = "eval" ]
   then
     fml_eval "$@"
+  elif [ $cmd = "oldeval" ]
+  then
+    fml_oldeval "$@"
   elif [ $cmd = "dump" ]
   then
     fml_dump "$@"
