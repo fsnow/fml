@@ -29,15 +29,13 @@ function fml_conf_var()
   cat $CONFIG | jq -r ".$1.$2"
 }
 
+# Returns full config for all running instances
 function fml_list()
 {
-  echo "cluster alias, subdirectory (under mlaunchdata)"
-  echo "--------------------------------------"
-  DIRS=`psgm | grep dbpath | awk '{ split($14, p, "/"); print p[5] }' | uniq | sort`
-  for DIR in $DIRS
+  ports=`psgm | grep dbpath | awk '{ print $16 }' | uniq | sort`
+  for port in $ports
   do
-    NAME=$(cat $CONFIG | jq -r "to_entries[] | select(.value.directory == \"mlaunchdata/$(echo $DIR)\") | .key")
-    echo "$NAME, $DIR" 
+    cat $CONFIG | jq -r "with_entries(select(.value.startPort == $(echo $port))) | select(length > 0)"
   done
   echo ""
 }
@@ -202,64 +200,66 @@ function fml_sync()
 
 function fml_help()
 {
-  echo "fml (\"Fast MongoDB Launcher\") is a command-line interface for managing "
-  echo "local MongoDB instances. Depending on the executed command, it expects that the "
-  echo "following tools are already installed and available on the command line:"
-  echo "  m "
-  echo "  mlaunch"
-  echo "  mongosh"
-  echo "  mongo"
-  echo "  mongosync"
-  echo "  mongodump"
-  echo "  mongorestore"
-  echo ""
-  echo "Usage:"
-  echo "  fml [command]"
-  echo ""
-  echo "Examples:"
-  echo "  # Initialize the cluster with alias \"myproject\""
-  echo "  fml init myproject"
-  echo ""
-  echo "Available Commands:"
-  echo "  help                    "
-  echo "      Displays this message"
-  echo "  list                    "
-  echo "      Lists currently running local instances by alias and mlaunchdata subdirectory"
-  echo "  config                  "
-  echo "      Displays the configuration file"
-  echo "  init <alias>                    "
-  echo "      Calls m to ensure that the configured version is installed, then calls mlaunch init" 
-  echo "      to create a new cluster"
-  echo "  start <alias>                   "
-  echo "      Calls mlaunch start for an alias"
-  echo "  stop <alias>                    "
-  echo "      Calls mlaunch stop for an alias"
-  echo "  cleanup <alias>                 "
-  echo "      Stops the cluster for an alias and deletes its data directory"
-  echo "  reinit <alias>                 "
-  echo "      Stops the cluster for an alias, deletes its data directory, then calls mlaunch init"
-  echo "  sh <alias>                      "
-  echo "      Starts a mongosh session for an alias"
-  echo "  oldsh <alias>                   "
-  echo "      Starts a mongo legacy shell session for an alias"
-  echo "  eval <alias> <command to eval>                   "
-  echo "      Evals a command in the mongosh shell."
-  echo "      Example:"
-  echo "      fml eval myalias 'db.version'"
-  echo "  oldeval <alias> <command to eval>                   "
-  echo "      Evals a command in the mongo shell."
-  echo "  dump <alias>               "
-  echo "      Calls mongodump with no parameters except the connection string"
-  echo "  restore <alias> <dbName> <gz file or directory>                "
-  echo "      Calls mongorestore to restore the data to the specified database"
-  echo "  dump_restore <alias1> <alias2>               "
-  echo "      Calls mongodump to dump all databases from alias1 cluster to a temporary directory, "
-  echo "      mongorestore of dump to alias2 cluster, deletes temp directory."
-  echo "  sync <alias1> <alias2>                    "
-  echo "      Copies the data from alias1 cluster to alias2 cluster with mongosync."
-  echo "      (Work in progress. Does not work with all version combinations and can only "
-  echo "      copy all databases and collections)"
-  echo ""
+less << EndOfHELP
+fml ("Fast MongoDB Launcher") is a command-line interface for managing 
+local MongoDB instances. Depending on the executed command, it expects that the 
+following tools are already installed and available on the command line:
+  jq
+  m 
+  mlaunch
+  mongosh
+  mongo
+  mongosync
+  mongodump
+  mongorestore
+
+Usage:
+  fml [command]
+
+Examples:
+  # Initialize the cluster with alias "myproject"
+  fml init myproject
+
+Available Commands:
+  help                    
+      Displays this message
+  list                    
+      Lists currently running local instances by alias and mlaunchdata subdirectory
+  config                  
+      Displays the configuration file
+  init <alias>                    
+      Calls m to ensure that the configured version is installed, then calls mlaunch init 
+      to create a new cluster
+  start <alias>                   
+      Calls mlaunch start for an alias
+  stop <alias>                    
+      Calls mlaunch stop for an alias
+  cleanup <alias>                 
+      Stops the cluster for an alias and deletes its data directory
+  reinit <alias>                 
+      Stops the cluster for an alias, deletes its data directory, then calls mlaunch init
+  sh <alias>                      
+      Starts a mongosh session for an alias
+  oldsh <alias>                   
+      Starts a mongo legacy shell session for an alias
+  eval <alias> <command to eval>                   
+      Evals a command in the mongosh shell.
+      Example:
+      fml eval myalias 'db.version'
+  oldeval <alias> <command to eval>                   
+      Evals a command in the mongo shell.
+  dump <alias>               
+      Calls mongodump with no parameters except the connection string
+  restore <alias> <dbName> <gz file or directory>                
+      Calls mongorestore to restore the data to the specified database
+  dump_restore <alias1> <alias2>               
+      Calls mongodump to dump all databases from alias1 cluster to a temporary directory, 
+      mongorestore of dump to alias2 cluster, deletes temp directory.
+  sync <alias1> <alias2>                    
+      Copies the data from alias1 cluster to alias2 cluster with mongosync.
+      (Work in progress. Does not work with all version combinations and can only 
+      copy all databases and collections)
+EndOfHELP
 }
 
 function fml()
@@ -379,3 +379,25 @@ function killmongosync()
 {
   kill -9 `ps -ef | grep mongosync-macos | grep -v grep | awk '{ print $2 }'`
 }
+
+
+
+# ------------ retired below here ---------------------------
+
+# old impl. The full config is more useful.
+function fml_list_alias_and_directory()
+{
+  echo "cluster alias, subdirectory (under mlaunchdata)"
+  echo "--------------------------------------"
+  DIRS=`psgm | grep dbpath | awk '{ split($14, p, "/"); print p[5] }' | uniq | sort`
+  for DIR in $DIRS
+  do
+    NAME=$(cat $CONFIG | jq -r "to_entries[] | select(.value.directory == \"mlaunchdata/$(echo $DIR)\") | .key")
+    echo "$NAME, $DIR" 
+  done
+  echo ""
+}
+
+
+
+
