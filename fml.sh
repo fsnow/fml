@@ -29,8 +29,34 @@ function fml_conf_var()
   cat $CONFIG | jq -r ".$1.$2"
 }
 
+# Returns true if alias has been initialized, directory exists
+function fml_is_init()
+{
+  dir=$(fml_conf_var $1 "directory")
+  if [[ -d $dir ]] 
+  then
+    echo "true"
+  else
+    echo "false"
+  fi
+}
+
+
+# Returns true if alias is running
+function fml_is_running()
+{
+  port=$(fml_conf_var $1 "startPort")
+  runningports=`psgm | grep dbpath | awk '{ print $16 }' | uniq | sort`
+  if [[ ${runningports[@]} =~ $port ]] 
+  then
+    echo "true"
+  else
+    echo "false"
+  fi
+}
+
 # Returns full config for all running instances
-function fml_list()
+function fml_list_running_json()
 {
   ports=`psgm | grep dbpath | awk '{ print $16 }' | uniq | sort`
   for port in $ports
@@ -40,22 +66,97 @@ function fml_list()
   echo ""
 }
 
+# Returns aliases for all running instances
+function fml_list_running_aliases()
+{
+  ports=`psgm | grep dbpath | awk '{ print $16 }' | uniq | sort`
+  for port in $ports
+  do
+    cat $CONFIG | jq -r "with_entries(select(.value.startPort == $(echo $port))) | keys[]"
+  done
+}
+
+# Returns aliases for all stopped instances
+function fml_list_stopped_aliases()
+{
+  local aliases=$(fml_list_all_aliases)
+  for alias in $aliases
+  do
+    local is_running=$(fml_is_running $alias)
+    if [[ $is_running == "false" ]]
+    then
+      echo $alias
+    fi
+  done
+}
+
+
+
+# Returns aliases for all running instances
+function fml_list_all_aliases()
+{
+  cat $CONFIG | jq "keys[]" | tr -d '"'
+}
+
+# Returns aliases that have been initialized (i.e. have existing directories)
+function fml_list_dir_exists_aliases()
+{
+  dirs=$(cat $CONFIG | jq '.. | .directory? | select(length > 0)')
+  for dir in $dirs
+  do
+    nqdir=$(echo $dir | tr -d '"')
+    if [[ -d "$nqdir" ]]
+    then
+      cat $CONFIG | jq -r "with_entries(select(.value.directory == $(echo $dir))) | keys[]"
+    fi
+  done
+}
+
+# Returns aliases that have not been initialized (i.e. have no existing directories)
+function fml_list_dir_not_exists_aliases()
+{
+  dirs=$(cat $CONFIG | jq '.. | .directory? | select(length > 0)')
+  for dir in $dirs
+  do
+    nqdir=$(echo $dir | tr -d '"')
+    if [[ ! -d "$nqdir" ]]
+    then
+      cat $CONFIG | jq -r "with_entries(select(.value.directory == $(echo $dir))) | keys[]"
+    fi
+  done
+}
+
 function fml_init()
 {
-  local INIT_ARGS=$(fml_conf_var $1 initArgs)
-  local DIR=$(fml_conf_var $1 directory)
-  local MONGO_VER=$(fml_conf_var $1 mongoVersion)
-  local START_PORT=$(fml_conf_var $1 startPort)
-  # suppress confirmation prompt in m
-  export M_CONFIRM=0
-  # install specified version of MongoDB with m
-  m $MONGO_VER
-  mlaunch init $INIT_ARGS --dir $DIR --binarypath `m bin $MONGO_VER` --port $START_PORT
+  local is_init=$(fml_is_init $1)
+  if [[ $is_init == "false" ]]
+  then
+    local INIT_ARGS=$(fml_conf_var $1 initArgs)
+    local DIR=$(fml_conf_var $1 directory)
+    local MONGO_VER=$(fml_conf_var $1 mongoVersion)
+    local START_PORT=$(fml_conf_var $1 startPort)
+    # suppress confirmation prompt in m
+    export M_CONFIRM=0
+    # install specified version of MongoDB with m
+    m $MONGO_VER
+    mlaunch init $INIT_ARGS --dir $DIR --binarypath `m bin $MONGO_VER` --port $START_PORT
+    sleep 5
+  else
+    echo "$1 already initialized"
+  fi
 }
 
 function fml_start()
 {
-  mlaunch start --dir "$(fml_conf_var $1 directory)"
+  fml_init $1
+  local is_running=$(fml_is_running $1)
+  if [[ $is_running == "false" ]]
+  then
+    mlaunch start --dir "$(fml_conf_var $1 directory)"
+    sleep 5
+  else
+    echo "$1 is already running"
+  fi
 }
 
 function fml_stop()
@@ -84,20 +185,27 @@ function fml_reinit()
 
 function fml_sh()
 {
+  fml_start $1
   local alias1="$1"
   shift 1
-  mongosh "$(fml_conf_var $alias1 connectionString)" "$@"
+  local conn="$(fml_conf_var $alias1 connectionString)"
+  # first mongosh fails after init, do a dummy eval to get past the failure
+  mongosh --quiet --norc --eval "db.version()" $conn "$@"
+  mongosh $conn "$@"
 }
 
 function fml_oldsh()
 {
+  fml_start $1
   local alias1="$1"
   shift 1
-  mongo "$(fml_conf_var $alias1 connectionString)" "$@"
+  local conn="$(fml_conf_var $alias1 connectionString)"
+  mongo $conn "$@"
 }
 
 function fml_eval()
 {
+  fml_start $1
   local alias1="$1"
   local ev="$2"
   shift 2
@@ -107,6 +215,7 @@ function fml_eval()
 
 function fml_oldeval()
 {
+  fml_start $1
   local alias1="$1"
   local ev="$2"
   shift 2
@@ -116,6 +225,7 @@ function fml_oldeval()
 
 function fml_dump()
 {
+  fml_start $1
   local alias1="$1"
   shift
   mongodump "$(fml_conf_var $alias1 connectionString)" "$@"
@@ -123,6 +233,7 @@ function fml_dump()
 
 function fml_restore()
 {
+  fml_start $1
   local alias1="$1"
   shift 1
   mongorestore "$(fml_conf_var $alias1 connectionString)" "$@"
@@ -130,6 +241,8 @@ function fml_restore()
 
 function fml_dump_restore()
 {
+  fml_start $1
+  fml_start $2
   local alias0="$1"
   local alias1="$2"
   dumpdir=$(mktemp -d 2>/dev/null || mktemp -d -t 'dump_')
@@ -140,6 +253,7 @@ function fml_dump_restore()
 
 function fml_restore()
 {
+  fml_start $1
   local alias1="$1"
   shift 1
   mongorestore "$(fml_conf_var $alias1 connectionString)" "$@"
@@ -147,11 +261,14 @@ function fml_restore()
 
 function fml_config()
 {
-  cat $CONFIG
+  cat $CONFIG | jq
 }
 
 function fml_sync()
 {
+  fml_start $1
+  fml_start $2
+
   local alias0="$1"
   local alias1="$2"
   shift 2
@@ -271,7 +388,7 @@ function fml()
 
   if [ $cmd = "list" ]
   then
-    fml_list
+    fml_list_running_json
   elif [ $cmd = "init" ]
   then
     fml_init "$@"
@@ -328,6 +445,57 @@ function fml()
   fi
 }
 
+
+takes_no_dir_alias=("init")
+takes_alias_any_state=("sh" "oldsh" "eval" "restore" "dump" "dump_restore" "sync")
+takes_alias_already_init=("cleanup" "reinit")
+takes_running_alias=("stop")
+takes_stopped_alias=("start")
+takes_second_alias=("dump_restore" "sync")
+
+
+function fml_autocomplete()
+{
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    prevprev="${COMP_WORDS[COMP_CWORD-2]}"
+    opts="help list config init start stop cleanup reinit sh oldsh eval oldeval dump restore dump_restore sync"
+
+    if [[ ${prev} == "fml" ]] ; then
+      COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+      return 0
+    elif [[ ${takes_no_dir_alias[@]} =~ $prev ]] ; then
+      local aliases=$(fml_list_dir_not_exists_aliases)
+      COMPREPLY=( $(compgen -W "${aliases}" -- ${cur}) )
+      return 0
+    elif [[ ${takes_alias_any_state[@]} =~ $prev ]] ; then
+      local aliases=$(fml_list_all_aliases)
+      COMPREPLY=( $(compgen -W "${aliases}" -- ${cur}) )
+      return 0
+    elif [[ ${takes_alias_already_init[@]} =~ $prev ]] ; then
+      local aliases=$(fml_list_dir_exists_aliases)
+      COMPREPLY=( $(compgen -W "${aliases}" -- ${cur}) )
+      return 0
+    elif [[ ${takes_running_alias[@]} =~ $prev ]] ; then
+      local aliases=$(fml_list_running_aliases)
+      COMPREPLY=( $(compgen -W "${aliases}" -- ${cur}) )
+      return 0
+    elif [[ ${takes_stopped_alias[@]} =~ $prev ]] ; then
+      local aliases=$(fml_list_stopped_aliases)
+      COMPREPLY=( $(compgen -W "${aliases}" -- ${cur}) )
+      return 0
+    elif [[ ${takes_second_alias[@]} =~ $prevprev ]] ; then
+      local aliases=$(fml_list_all_aliases)
+      COMPREPLY=( $(compgen -W "${aliases}" -- ${cur}) )
+      return 0
+    fi
+}
+
+complete -F fml_autocomplete fml
+
+
 function msync_wait_until() 
 {
   echo "Waiting for condition: $1"
@@ -379,6 +547,7 @@ function killmongosync()
 {
   kill -9 `ps -ef | grep mongosync-macos | grep -v grep | awk '{ print $2 }'`
 }
+
 
 
 
