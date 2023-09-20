@@ -126,6 +126,17 @@ function fml_list_dir_not_exists_aliases()
   done
 }
 
+# takes an alias or connection string, returns connection string
+function fml_to_connection_string()
+{
+  if [[ $1 == mongodb://* ]] || [[ $1 == mongodb+srv://* ]]
+  then
+    echo $1
+  else
+    echo "$(fml_conf_var $1 connectionString)"
+  fi
+}
+
 function fml_init()
 {
   local is_init=$(fml_is_init $1)
@@ -141,21 +152,20 @@ function fml_init()
     m $MONGO_VER
     mlaunch init $INIT_ARGS --dir $DIR --binarypath `m bin $MONGO_VER` --port $START_PORT
     sleep 5
-  else
-    echo "$1 already initialized"
   fi
 }
 
 function fml_start()
 {
-  fml_init $1
-  local is_running=$(fml_is_running $1)
-  if [[ $is_running == "false" ]]
+  if ! [[ $1 == mongodb://* ]] && ! [[ $1 == mongodb+srv://* ]]
   then
-    mlaunch start --dir "$(fml_conf_var $1 directory)"
-    sleep 5
-  else
-    echo "$1 is already running"
+    fml_init $1
+    local is_running=$(fml_is_running $1)
+    if [[ $is_running == "false" ]]
+    then
+      mlaunch start --dir "$(fml_conf_var $1 directory)"
+      sleep 5
+    fi
   fi
 }
 
@@ -186,9 +196,9 @@ function fml_reinit()
 function fml_sh()
 {
   fml_start $1
-  local alias1="$1"
+  local arg1="$1"
   shift 1
-  local conn="$(fml_conf_var $alias1 connectionString)"
+  local conn=$(fml_to_connection_string $arg1)
   # first mongosh fails after init, do a dummy eval to get past the failure
   mongosh --quiet --norc --eval "db.version()" $conn "$@"
   mongosh $conn "$@"
@@ -197,66 +207,71 @@ function fml_sh()
 function fml_oldsh()
 {
   fml_start $1
-  local alias1="$1"
+  local arg1="$1"
   shift 1
-  local conn="$(fml_conf_var $alias1 connectionString)"
+  local conn=$(fml_to_connection_string $arg1)
   mongo $conn "$@"
 }
 
 function fml_eval()
 {
   fml_start $1
-  local alias1="$1"
+  local arg1="$1"
   local ev="$2"
   shift 2
-  local conn="$(fml_conf_var $alias1 connectionString)"
+  local conn=$(fml_to_connection_string $arg1)
   mongosh --quiet --norc --eval "$ev" $conn "$@"
 }
 
 function fml_oldeval()
 {
   fml_start $1
-  local alias1="$1"
+  local arg1="$1"
   local ev="$2"
   shift 2
-  local conn="$(fml_conf_var $alias1 connectionString)"
+  local conn=$(fml_to_connection_string $arg1)
   mongo --quiet --norc --eval "$ev" $conn "$@"
 }
 
 function fml_dump()
 {
   fml_start $1
-  local alias1="$1"
+  local arg1="$1"
   shift
-  mongodump "$(fml_conf_var $alias1 connectionString)" "$@"
+  local conn=$(fml_to_connection_string $arg1)
+  mongodump $conn "$@"
 }
 
 function fml_restore()
 {
   fml_start $1
-  local alias1="$1"
+  local arg1="$1"
   shift 1
-  mongorestore "$(fml_conf_var $alias1 connectionString)" "$@"
+  local conn=$(fml_to_connection_string $arg1)
+  mongorestore $conn "$@"
 }
 
 function fml_dump_restore()
 {
   fml_start $1
   fml_start $2
-  local alias0="$1"
-  local alias1="$2"
+  local arg1="$1"
+  local arg2="$2"
+  local conn1=$(fml_to_connection_string $arg1)
+  local conn2=$(fml_to_connection_string $arg2)
   dumpdir=$(mktemp -d 2>/dev/null || mktemp -d -t 'dump_')
-  mongodump "$(fml_conf_var $alias0 connectionString)" --out="$dumpdir"
-  mongorestore "$(fml_conf_var $alias1 connectionString)" --dir="$dumpdir"
+  mongodump $conn1 --out="$dumpdir"
+  mongorestore $conn2 --dir="$dumpdir"
   rm -rf $dumpdir
 }
 
 function fml_restore()
 {
   fml_start $1
-  local alias1="$1"
+  local arg1="$1"
   shift 1
-  mongorestore "$(fml_conf_var $alias1 connectionString)" "$@"
+  local conn=$(fml_to_connection_string $arg1)
+  mongorestore $conn "$@"
 }
 
 function fml_config()
@@ -269,19 +284,19 @@ function fml_sync()
   fml_start $1
   fml_start $2
 
-  local alias0="$1"
-  local alias1="$2"
+  local arg1="$1"
+  local arg2="$2"
   shift 2
-  
-  local connstr0="$(fml_conf_var $alias0 connectionString)"
-  local connstr1="$(fml_conf_var $alias1 connectionString)"
-  
-  local logfile="mongosync_log_${alias0}_${alias1}.log"
+
+  local connstr0=$(fml_to_connection_string $arg1)
+  local connstr1=$(fml_to_connection_string $arg2)
+
+  local logfile="mongosync.log"
   rm -rf $logfile
   echo "Mongosync log file: $logfile"
 
-  local ver0="$(fml_eval $alias0 'db.version()')"
-  local ver1="$(fml_eval $alias1 'db.version()')"
+  local ver0="$(fml_eval $arg1 'db.version()')"
+  local ver1="$(fml_eval $arg2 'db.version()')"
 
   local extra_msync_args=''
   local extra_start_json=''
@@ -294,8 +309,8 @@ function fml_sync()
   echo "extra_msync_args: $extra_msync_args"
   echo "extra_start_json: $extra_start_json"
 
-  fml_sh $alias0 --quiet --norc --eval 'db.getSiblingDB("mongosync_reserved_for_internal_use").dropDatabase()'
-  fml_sh $alias1 --quiet --norc --eval 'db.getSiblingDB("mongosync_reserved_for_internal_use").dropDatabase()'
+  fml_sh $arg1 --quiet --norc --eval 'db.getSiblingDB("mongosync_reserved_for_internal_use").dropDatabase()'
+  fml_sh $arg2 --quiet --norc --eval 'db.getSiblingDB("mongosync_reserved_for_internal_use").dropDatabase()'
 
   local pause_fn="$1"
   shift 1
@@ -312,7 +327,19 @@ function fml_sync()
   kill -9 $msync_pid
   echo "Killed mongosync"
 
-  fml_sh $alias1 --quiet --norc --eval 'db.getSiblingDB("mongosync_reserved_for_internal_use").dropDatabase()'
+  fml_sh $arg1 --quiet --norc --eval 'db.getSiblingDB("mongosync_reserved_for_internal_use").dropDatabase()'
+}
+
+function fml_export()
+{
+  fml_start $1
+  local arg1="$1"
+  local db="$2"
+  local coll="$3"
+  local file="$4"
+  shift 4
+  local conn=$(fml_to_connection_string $arg1)
+  mongoexport $conn --db=$db --collection=$coll --out=$file "$@"
 }
 
 function fml_help()
@@ -329,6 +356,7 @@ following tools are already installed and available on the command line:
   mongosync
   mongodump
   mongorestore
+  monogexport
 
 Usage:
   fml [command]
@@ -376,6 +404,8 @@ Available Commands:
       Copies the data from alias1 cluster to alias2 cluster with mongosync.
       (Work in progress. Does not work with all version combinations and can only 
       copy all databases and collections)
+  export <alias> <db> <collection> <file>
+      Calls mongoexport to export JSON data to file.
 EndOfHELP
 }
 
@@ -437,6 +467,9 @@ function fml()
   elif [ $cmd = "sync" ]
   then
     fml_sync "$@"
+  elif [ $cmd = "export" ]
+  then
+    fml_export "$@"
   elif [ $cmd = "help" ]
   then
     fml_help
