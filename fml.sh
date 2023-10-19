@@ -174,6 +174,16 @@ function fml_stop()
   mlaunch stop --dir "$(fml_conf_var $1 directory)"
 }
 
+function fml_upgrade()
+{
+  fml_stop "$1"
+  sleep 10
+  local dir=$(fml_conf_var $1 directory)
+  local ver=$(fml_conf_var $1 mongoVersion)
+  sed -i '' "s/$ver/$2/g" $dir/.mlaunch_startup
+  jq --arg key "$1" --arg version "$2" '.[$key].mongoVersion = $version' "$CONFIG" > tmp.json && mv tmp.json "$CONFIG"
+}
+
 # param is cluster alias, e.g. myproject
 function fml_delete_dir()
 {
@@ -379,6 +389,8 @@ Available Commands:
       Calls mlaunch start for an alias
   stop <alias>                    
       Calls mlaunch stop for an alias
+  upgrade <alias> <new version>
+      Updates the mlaunch config file and fml config file for a patch version upgrade
   cleanup <alias>                 
       Stops the cluster for an alias and deletes its data directory
   reinit <alias>                 
@@ -428,6 +440,9 @@ function fml()
   elif [ $cmd = "stop" ]
   then
     fml_stop "$@"
+  elif [ $cmd = "upgrade" ]
+  then
+    fml_upgrade "$@"
   elif [ $cmd = "cleanup" ]
   then
     fml_cleanup "$@"
