@@ -58,7 +58,7 @@ function fml_is_running()
 # Returns full config for all running instances
 function fml_list_running_json()
 {
-  ports=`psgm | grep dbpath | awk '{ print $16 }' | uniq | sort`
+  ports=`psgm | grep "port" | sed -r 's/.*--port ([0-9]+).*/\1/' | uniq | sort`
   for port in $ports
   do
     cat $CONFIG | jq -r "with_entries(select(.value.startPort == $(echo $port))) | select(length > 0)"
@@ -210,7 +210,7 @@ function fml_sh()
   shift 1
   local conn=$(fml_to_connection_string $arg1)
   # first mongosh fails after init, do a dummy eval to get past the failure
-  mongosh --quiet --norc --eval "db.version()" $conn "$@"
+  mongosh --quiet --norc --eval "db.version()" $conn
   mongosh $conn "$@"
 }
 
@@ -355,6 +355,7 @@ function fml_export()
 function fml_help()
 {
 less << EndOfHELP
+
 fml ("Fast MongoDB Launcher") is a command-line interface for managing 
 local MongoDB instances. Depending on the executed command, it expects that the 
 following tools are already installed and available on the command line:
@@ -581,6 +582,11 @@ function killmongod()
   kill -9 `psgmd | awk '{ print $2; }'`
 }
 
+function killmongos() 
+{
+  kill -9 `psgms | awk '{ print $2; }'`
+}
+
 function killmongo() 
 {
   kill -9 `psgm | awk '{ print $2; }'`
@@ -601,16 +607,16 @@ function killmongosync()
 
 # ------------ retired below here ---------------------------
 
-# old impl. The full config is more useful.
+# old impl. The "fml list" with config output is more useful.
 function fml_list_alias_and_directory()
 {
   echo "cluster alias, subdirectory (under mlaunchdata)"
   echo "--------------------------------------"
-  DIRS=`psgm | grep dbpath | awk '{ split($14, p, "/"); print p[5] }' | uniq | sort`
-  for DIR in $DIRS
+  dirs=`psgm | grep dbpath | awk '{ split($14, p, "/"); print p[5] }' | uniq | sort`
+  for dir in $dirs
   do
-    NAME=$(cat $CONFIG | jq -r "to_entries[] | select(.value.directory == \"mlaunchdata/$(echo $DIR)\") | .key")
-    echo "$NAME, $DIR" 
+    alias=$(cat $CONFIG | jq -r "to_entries[] | select(.value.directory == \"mlaunchdata/$(echo $dir)\") | .key")
+    echo "$alias, $dir" 
   done
   echo ""
 }
