@@ -1,8 +1,40 @@
 
 CONFIG=${FML_CONFIG:-~/fml/fml_config.json}
 
+# Check if required dependencies are installed
+function fml_check_deps()
+{
+  local missing=()
+  for cmd in jq m mlaunch mongosh; do
+    if ! command -v $cmd >/dev/null 2>&1; then
+      missing+=("$cmd")
+    fi
+  done
 
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Error: Required commands not found: ${missing[*]}" >&2
+    echo "Please install missing dependencies before using fml." >&2
+    return 1
+  fi
+  return 0
+}
 
+# Validate config file exists and is valid JSON
+function fml_validate_config()
+{
+  if [[ ! -f "$CONFIG" ]]; then
+    echo "Error: Config file not found: $CONFIG" >&2
+    echo "Please create a config file or set FML_CONFIG environment variable." >&2
+    return 1
+  fi
+
+  if ! jq empty "$CONFIG" 2>/dev/null; then
+    echo "Error: Config file is not valid JSON: $CONFIG" >&2
+    return 1
+  fi
+
+  return 0
+}
 
 function psgm()
 {
@@ -26,7 +58,7 @@ function psgms()
 function fml_conf_var()
 {
   # jq -r returns the values without quotes
-  cat $CONFIG | jq -r ".$1.$2"
+  jq -r ".$1.$2" "$CONFIG"
 }
 
 # Returns true if alias has been initialized, directory exists
@@ -46,7 +78,7 @@ function fml_is_init()
 function fml_is_running()
 {
   port=$(fml_conf_var $1 "startPort")
-  runningports=`psgm | grep dbpath | awk '{ print $16 }' | uniq | sort`
+  runningports=$(psgm | grep dbpath | awk '{ print $16 }' | uniq | sort)
   if [[ ${runningports[@]} =~ $port ]] 
   then
     echo "true"
@@ -58,10 +90,10 @@ function fml_is_running()
 # Returns full config for all running instances
 function fml_list_running_json()
 {
-  ports=`psgm | grep "port" | sed -r 's/.*--port ([0-9]+).*/\1/' | uniq | sort`
+  ports=$(psgm | grep "port" | sed -E 's/.*--port ([0-9]+).*/\1/' | uniq | sort)
   for port in $ports
   do
-    cat $CONFIG | jq -r "with_entries(select(.value.startPort == $(echo $port))) | select(length > 0)"
+    jq -r "with_entries(select(.value.startPort == $port)) | select(length > 0)" "$CONFIG"
   done
   echo ""
 }
@@ -69,10 +101,10 @@ function fml_list_running_json()
 # Returns aliases for all running instances
 function fml_list_running_aliases()
 {
-  ports=`psgm | grep dbpath | awk '{ print $16 }' | uniq | sort`
+  ports=$(psgm | grep dbpath | awk '{ print $16 }' | uniq | sort)
   for port in $ports
   do
-    cat $CONFIG | jq -r "with_entries(select(.value.startPort == $(echo $port))) | keys[]"
+    jq -r "with_entries(select(.value.startPort == $port)) | keys[]" "$CONFIG"
   done
 }
 
@@ -95,19 +127,18 @@ function fml_list_stopped_aliases()
 # Returns aliases for all running instances
 function fml_list_all_aliases()
 {
-  cat $CONFIG | jq "keys[]" | tr -d '"'
+  jq -r "keys[]" "$CONFIG"
 }
 
 # Returns aliases that have been initialized (i.e. have existing directories)
 function fml_list_dir_exists_aliases()
 {
-  dirs=$(cat $CONFIG | jq '.. | .directory? | select(length > 0)')
-  for dir in $dirs
+  local aliases=$(fml_list_all_aliases)
+  for alias in $aliases
   do
-    nqdir=$(echo $dir | tr -d '"')
-    if [[ -d "$nqdir" ]]
-    then
-      cat $CONFIG | jq -r "with_entries(select(.value.directory == $(echo $dir))) | keys[]"
+    local dir=$(fml_conf_var $alias "directory")
+    if [[ -n "$dir" && -d "$dir" ]]; then
+      echo $alias
     fi
   done
 }
@@ -115,13 +146,12 @@ function fml_list_dir_exists_aliases()
 # Returns aliases that have not been initialized (i.e. have no existing directories)
 function fml_list_dir_not_exists_aliases()
 {
-  dirs=$(cat $CONFIG | jq '.. | .directory? | select(length > 0)')
-  for dir in $dirs
+  local aliases=$(fml_list_all_aliases)
+  for alias in $aliases
   do
-    nqdir=$(echo $dir | tr -d '"')
-    if [[ ! -d "$nqdir" ]]
-    then
-      cat $CONFIG | jq -r "with_entries(select(.value.directory == $(echo $dir))) | keys[]"
+    local dir=$(fml_conf_var $alias "directory")
+    if [[ -n "$dir" && ! -d "$dir" ]]; then
+      echo $alias
     fi
   done
 }
@@ -146,11 +176,33 @@ function fml_init()
     local DIR=$(fml_conf_var $1 directory)
     local MONGO_VER=$(fml_conf_var $1 mongoVersion)
     local START_PORT=$(fml_conf_var $1 startPort)
+
+    # Validate required config values
+    if [[ -z "$DIR" || -z "$MONGO_VER" || -z "$START_PORT" ]]; then
+      echo "Error: Missing required configuration for alias '$1'" >&2
+      return 1
+    fi
+
     # suppress confirmation prompt in m
     export M_CONFIRM=0
     # install specified version of MongoDB with m
-    m $MONGO_VER
-    mlaunch init $INIT_ARGS --dir $DIR --binarypath `m bin $MONGO_VER` --port $START_PORT
+    echo "Installing MongoDB version $MONGO_VER..."
+    if ! m $MONGO_VER; then
+      echo "Error: Failed to install MongoDB version $MONGO_VER" >&2
+      return 1
+    fi
+
+    local BINPATH=$(m bin $MONGO_VER)
+    if [[ ! -x "$BINPATH/mongod" ]]; then
+      echo "Error: MongoDB binaries not found at $BINPATH" >&2
+      return 1
+    fi
+
+    echo "Initializing cluster with mlaunch..."
+    if ! mlaunch init $INIT_ARGS --dir "$DIR" --binarypath "$BINPATH" --port $START_PORT; then
+      echo "Error: mlaunch init failed" >&2
+      return 1
+    fi
     sleep 5
   fi
 }
@@ -176,18 +228,48 @@ function fml_stop()
 
 function fml_upgrade()
 {
+  if [[ -z "$2" ]]; then
+    echo "Error: New version required. Usage: fml upgrade <alias> <new_version>" >&2
+    return 1
+  fi
+
   fml_stop "$1"
   sleep 10
   local dir=$(fml_conf_var $1 directory)
   local ver=$(fml_conf_var $1 mongoVersion)
-  sed -i '' "s/$ver/$2/g" $dir/.mlaunch_startup
-  jq --arg key "$1" --arg version "$2" '.[$key].mongoVersion = $version' "$CONFIG" > tmp.json && mv tmp.json "$CONFIG"
+
+  if [[ ! -f "$dir/.mlaunch_startup" ]]; then
+    echo "Error: mlaunch startup file not found: $dir/.mlaunch_startup" >&2
+    return 1
+  fi
+
+  # Portable sed -i for both macOS and Linux
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "s/$ver/$2/g" "$dir/.mlaunch_startup"
+  else
+    sed -i "s/$ver/$2/g" "$dir/.mlaunch_startup"
+  fi
+
+  if ! jq --arg key "$1" --arg version "$2" '.[$key].mongoVersion = $version' "$CONFIG" > tmp.json; then
+    echo "Error: Failed to update config file" >&2
+    return 1
+  fi
+  mv tmp.json "$CONFIG"
+  echo "Upgraded $1 from $ver to $2"
 }
 
 # param is cluster alias, e.g. myproject
 function fml_delete_dir()
 {
-  rm -rf $(fml_conf_var $1 directory) 
+  local dir=$(fml_conf_var $1 directory)
+  if [[ -z "$dir" ]]; then
+    echo "Error: No directory configured for alias '$1'" >&2
+    return 1
+  fi
+  if [[ -d "$dir" ]]; then
+    echo "Deleting directory: $dir"
+    rm -rf "$dir"
+  fi
 }
 
 function fml_cleanup()
@@ -209,8 +291,9 @@ function fml_sh()
   local arg1="$1"
   shift 1
   local conn=$(fml_to_connection_string $arg1)
-  # first mongosh fails after init, do a dummy eval to get past the failure
-  mongosh --quiet --norc --eval "db.version()" $conn
+  # Workaround: first mongosh connection sometimes fails after init on certain versions
+  # Do a dummy eval to establish connection before opening interactive shell
+  mongosh --quiet --norc --eval "db.version()" $conn >/dev/null 2>&1
   mongosh $conn "$@"
 }
 
@@ -275,18 +358,9 @@ function fml_dump_restore()
   rm -rf $dumpdir
 }
 
-function fml_restore()
-{
-  fml_start $1
-  local arg1="$1"
-  shift 1
-  local conn=$(fml_to_connection_string $arg1)
-  mongorestore $conn "$@"
-}
-
 function fml_config()
 {
-  cat $CONFIG | jq
+  jq . "$CONFIG"
 }
 
 function fml_sync()
@@ -334,7 +408,11 @@ function fml_sync()
   msync_wait_until '.progress.state=="RUNNING" and .progress.info=="change event application"'
   msync_commit
   echo "Killing mongosync with pid $msync_pid"
-  kill -9 $msync_pid
+  if [[ -n "$msync_pid" ]]; then
+    kill $msync_pid 2>/dev/null
+    sleep 2
+    kill -9 $msync_pid 2>/dev/null
+  fi
   echo "Killed mongosync"
 
   fml_sh $arg1 --quiet --norc --eval 'db.getSiblingDB("mongosync_reserved_for_internal_use").dropDatabase()'
@@ -367,7 +445,7 @@ following tools are already installed and available on the command line:
   mongosync
   mongodump
   mongorestore
-  monogexport
+  mongoexport
 
 Usage:
   fml [command]
@@ -425,68 +503,80 @@ EndOfHELP
 function fml()
 {
   CONFIG=${FML_CONFIG:-~/fml/fml_config.json}
-  
-  local cmd="$1"
-  shift 1
 
-  if [ $cmd = "list" ]
+  # Handle no arguments
+  if [[ $# -eq 0 ]]; then
+    fml_help
+    return 0
+  fi
+
+  # Validate dependencies and config (skip for help command)
+  if [[ "$1" != "help" ]]; then
+    fml_check_deps || return 1
+    fml_validate_config || return 1
+  fi
+
+  local cmd="$1"
+  shift
+
+  if [ "$cmd" = "list" ]
   then
     fml_list_running_json
-  elif [ $cmd = "init" ]
+  elif [ "$cmd" = "init" ]
   then
     fml_init "$@"
-  elif [ $cmd = "start" ]
+  elif [ "$cmd" = "start" ]
   then
     fml_start "$@"
-  elif [ $cmd = "stop" ]
+  elif [ "$cmd" = "stop" ]
   then
     fml_stop "$@"
-  elif [ $cmd = "upgrade" ]
+  elif [ "$cmd" = "upgrade" ]
   then
     fml_upgrade "$@"
-  elif [ $cmd = "cleanup" ]
+  elif [ "$cmd" = "cleanup" ]
   then
     fml_cleanup "$@"
-  elif [ $cmd = "reinit" ]
+  elif [ "$cmd" = "reinit" ]
   then
     fml_reinit "$@"
-  elif [ $cmd = "sh" ]
+  elif [ "$cmd" = "sh" ]
   then
     fml_sh "$@"
-  elif [ $cmd = "mongosh" ]
+  elif [ "$cmd" = "mongosh" ]
   then
     fml_sh "$@"
-  elif [ $cmd = "oldsh" ]
+  elif [ "$cmd" = "oldsh" ]
   then
     fml_oldsh "$@"
-  elif [ $cmd = "mongo" ]
+  elif [ "$cmd" = "mongo" ]
   then
     fml_oldsh "$@"
-  elif [ $cmd = "eval" ]
+  elif [ "$cmd" = "eval" ]
   then
     fml_eval "$@"
-  elif [ $cmd = "oldeval" ]
+  elif [ "$cmd" = "oldeval" ]
   then
     fml_oldeval "$@"
-  elif [ $cmd = "dump" ]
+  elif [ "$cmd" = "dump" ]
   then
     fml_dump "$@"
-  elif [ $cmd = "restore" ]
+  elif [ "$cmd" = "restore" ]
   then
     fml_restore "$@"
-  elif [ $cmd = "dump_restore" ]
+  elif [ "$cmd" = "dump_restore" ]
   then
     fml_dump_restore "$@"
-  elif [ $cmd = "config" ]
+  elif [ "$cmd" = "config" ]
   then
     fml_config "$@"
-  elif [ $cmd = "sync" ]
+  elif [ "$cmd" = "sync" ]
   then
     fml_sync "$@"
-  elif [ $cmd = "export" ]
+  elif [ "$cmd" = "export" ]
   then
     fml_export "$@"
-  elif [ $cmd = "help" ]
+  elif [ "$cmd" = "help" ]
   then
     fml_help
   else
@@ -510,7 +600,7 @@ function fml_autocomplete()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     prevprev="${COMP_WORDS[COMP_CWORD-2]}"
-    opts="help list config init start stop cleanup reinit sh oldsh eval oldeval dump restore dump_restore sync"
+    opts="help list config init start stop upgrade cleanup reinit sh oldsh eval oldeval dump restore dump_restore sync export"
 
     if [[ ${prev} == "fml" ]] ; then
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
@@ -577,19 +667,34 @@ function msync_commit()
   echo ""
 }
 
-function killmongod() 
+function killmongod()
 {
-  kill -9 `psgmd | awk '{ print $2; }'`
+  local pids=$(psgmd | awk '{ print $2; }')
+  if [[ -n "$pids" ]]; then
+    kill $pids 2>/dev/null
+    sleep 2
+    kill -9 $pids 2>/dev/null
+  fi
 }
 
-function killmongos() 
+function killmongos()
 {
-  kill -9 `psgms | awk '{ print $2; }'`
+  local pids=$(psgms | awk '{ print $2; }')
+  if [[ -n "$pids" ]]; then
+    kill $pids 2>/dev/null
+    sleep 2
+    kill -9 $pids 2>/dev/null
+  fi
 }
 
-function killmongo() 
+function killmongo()
 {
-  kill -9 `psgm | awk '{ print $2; }'`
+  local pids=$(psgm | awk '{ print $2; }')
+  if [[ -n "$pids" ]]; then
+    kill $pids 2>/dev/null
+    sleep 2
+    kill -9 $pids 2>/dev/null
+  fi
 }
 
 function psmsync()
@@ -597,9 +702,14 @@ function psmsync()
   ps -ef | grep mongosync-macos | grep -v grep
 }
 
-function killmongosync() 
+function killmongosync()
 {
-  kill -9 `ps -ef | grep mongosync-macos | grep -v grep | awk '{ print $2 }'`
+  local pids=$(ps -ef | grep mongosync-macos | grep -v grep | awk '{ print $2 }')
+  if [[ -n "$pids" ]]; then
+    kill $pids 2>/dev/null
+    sleep 2
+    kill -9 $pids 2>/dev/null
+  fi
 }
 
 
@@ -612,10 +722,10 @@ function fml_list_alias_and_directory()
 {
   echo "cluster alias, subdirectory (under mlaunchdata)"
   echo "--------------------------------------"
-  dirs=`psgm | grep dbpath | awk '{ split($14, p, "/"); print p[5] }' | uniq | sort`
+  dirs=$(psgm | grep dbpath | awk '{ split($14, p, "/"); print p[5] }' | uniq | sort)
   for dir in $dirs
   do
-    alias=$(cat $CONFIG | jq -r "to_entries[] | select(.value.directory == \"mlaunchdata/$(echo $dir)\") | .key")
+    alias=$(jq -r "to_entries[] | select(.value.directory == \"mlaunchdata/$dir\") | .key" "$CONFIG")
     echo "$alias, $dir" 
   done
   echo ""
