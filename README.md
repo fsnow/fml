@@ -7,7 +7,7 @@
 ### Core (required)
 - [jq](https://jqlang.github.io/jq/) - JSON processor
 - [m](https://github.com/aheckmann/m) - MongoDB version manager
-- [mlaunch](http://blog.rueckstiess.com/mtools/mlaunch.html) - MongoDB cluster launcher (part of mtools)
+- [mrun](https://mongodb.github.io/mongorun/install.html) - MongoDB cluster launcher (the standalone successor to mlaunch)
 - [mongosh](https://www.mongodb.com/docs/mongodb-shell/) - MongoDB shell
 
 ### Optional
@@ -55,16 +55,16 @@ fml uses a JSON configuration file located at `~/fml/fml_config.json` by default
 
 | Field | Description |
 |-------|-------------|
-| `directory` | Data directory for mlaunch (relative or absolute path) |
+| `directory` | Data directory for mrun (relative or absolute path) |
 | `startPort` | Starting port number for the cluster |
 | `mongoVersion` | MongoDB version to install and use |
-| `initArgs` | Arguments passed to `mlaunch init` (e.g., `--replicaset`, `--single`, `--sharded N`) |
+| `initArgs` | Arguments passed to `mrun init` (e.g., `--replicaset`, `--single`, `--sharded N`) |
 | `connectionString` | MongoDB connection string for the cluster |
 | `comment` | Optional description of the instance |
 
 ## Installation
 
-1. Install the core dependencies (jq, m, mlaunch, mongosh)
+1. Install the core dependencies (jq, m, mrun, mongosh)
 2. Source the script in your shell profile:
 
 ```bash
@@ -169,7 +169,7 @@ fml dump_restore mongodb://remote:27017 local_alias
 | `help` | Display help message |
 | `list` | List currently running local instances |
 | `config` | Display the configuration file |
-| `init <alias>` | Install MongoDB version and create cluster with mlaunch |
+| `init <alias>` | Install MongoDB version and create cluster with mrun |
 | `start <alias>` | Start an existing cluster |
 | `stop <alias>` | Stop a running cluster |
 | `upgrade <alias> <version>` | Upgrade MongoDB version in-place |

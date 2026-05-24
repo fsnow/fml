@@ -5,7 +5,7 @@ CONFIG=${FML_CONFIG:-~/fml/fml_config.json}
 function fml_check_deps()
 {
   local missing=()
-  for cmd in jq m mlaunch mongosh; do
+  for cmd in jq m mrun mongosh; do
     if ! command -v $cmd >/dev/null 2>&1; then
       missing+=("$cmd")
     fi
@@ -198,9 +198,9 @@ function fml_init()
       return 1
     fi
 
-    echo "Initializing cluster with mlaunch..."
-    if ! mlaunch init $INIT_ARGS --dir "$DIR" --binarypath "$BINPATH" --port $START_PORT; then
-      echo "Error: mlaunch init failed" >&2
+    echo "Initializing cluster with mrun..."
+    if ! mrun init $INIT_ARGS --dir "$DIR" --binarypath "$BINPATH" --port $START_PORT; then
+      echo "Error: mrun init failed" >&2
       return 1
     fi
     sleep 5
@@ -215,7 +215,7 @@ function fml_start()
     local is_running=$(fml_is_running $1)
     if [[ $is_running == "false" ]]
     then
-      mlaunch start --dir "$(fml_conf_var $1 directory)"
+      mrun start --dir "$(fml_conf_var $1 directory)"
       sleep 5
     fi
   fi
@@ -223,7 +223,7 @@ function fml_start()
 
 function fml_stop()
 {
-  mlaunch stop --dir "$(fml_conf_var $1 directory)"
+  mrun stop --dir "$(fml_conf_var $1 directory)"
 }
 
 function fml_upgrade()
@@ -238,16 +238,16 @@ function fml_upgrade()
   local dir=$(fml_conf_var $1 directory)
   local ver=$(fml_conf_var $1 mongoVersion)
 
-  if [[ ! -f "$dir/.mlaunch_startup" ]]; then
-    echo "Error: mlaunch startup file not found: $dir/.mlaunch_startup" >&2
+  if [[ ! -f "$dir/.mrun_startup" ]]; then
+    echo "Error: mrun startup file not found: $dir/.mrun_startup" >&2
     return 1
   fi
 
   # Portable sed -i for both macOS and Linux
   if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' "s/$ver/$2/g" "$dir/.mlaunch_startup"
+    sed -i '' "s/$ver/$2/g" "$dir/.mrun_startup"
   else
-    sed -i "s/$ver/$2/g" "$dir/.mlaunch_startup"
+    sed -i "s/$ver/$2/g" "$dir/.mrun_startup"
   fi
 
   if ! jq --arg key "$1" --arg version "$2" '.[$key].mongoVersion = $version' "$CONFIG" > tmp.json; then
@@ -434,12 +434,12 @@ function fml_help()
 {
 less << EndOfHELP
 
-fml ("Fast MongoDB Launcher") is a command-line interface for managing 
-local MongoDB instances. Depending on the executed command, it expects that the 
+fml ("Fast MongoDB Launcher") is a command-line interface for managing
+local MongoDB instances. Depending on the executed command, it expects that the
 following tools are already installed and available on the command line:
   jq
-  m 
-  mlaunch
+  m
+  mrun
   mongosh
   mongo
   mongosync
@@ -457,23 +457,23 @@ Examples:
 Available Commands:
   help                    
       Displays this message
-  list                    
-      Lists currently running local instances by alias and mlaunchdata subdirectory
-  config                  
+  list
+      Lists currently running local instances by alias and data subdirectory
+  config
       Displays the configuration file
-  init <alias>                    
-      Calls m to ensure that the configured version is installed, then calls mlaunch init 
+  init <alias>
+      Calls m to ensure that the configured version is installed, then calls mrun init
       to create a new cluster
-  start <alias>                   
-      Calls mlaunch start for an alias
-  stop <alias>                    
-      Calls mlaunch stop for an alias
+  start <alias>
+      Calls mrun start for an alias
+  stop <alias>
+      Calls mrun stop for an alias
   upgrade <alias> <new version>
-      Updates the mlaunch config file and fml config file for a patch version upgrade
-  cleanup <alias>                 
+      Updates the mrun startup file and fml config file for a patch version upgrade
+  cleanup <alias>
       Stops the cluster for an alias and deletes its data directory
-  reinit <alias>                 
-      Stops the cluster for an alias, deletes its data directory, then calls mlaunch init
+  reinit <alias>
+      Stops the cluster for an alias, deletes its data directory, then calls mrun init
   sh <alias>                      
       Starts a mongosh session for an alias
   oldsh <alias>                   
@@ -711,26 +711,4 @@ function killmongosync()
     kill -9 $pids 2>/dev/null
   fi
 }
-
-
-
-
-# ------------ retired below here ---------------------------
-
-# old impl. The "fml list" with config output is more useful.
-function fml_list_alias_and_directory()
-{
-  echo "cluster alias, subdirectory (under mlaunchdata)"
-  echo "--------------------------------------"
-  dirs=$(psgm | grep dbpath | awk '{ split($14, p, "/"); print p[5] }' | uniq | sort)
-  for dir in $dirs
-  do
-    alias=$(jq -r "to_entries[] | select(.value.directory == \"mlaunchdata/$dir\") | .key" "$CONFIG")
-    echo "$alias, $dir" 
-  done
-  echo ""
-}
-
-
-
 
