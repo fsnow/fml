@@ -143,6 +143,19 @@ function fml_list_dir_exists_aliases()
   done
 }
 
+# Returns aliases whose data dir still has an .mlaunch_startup file (pending mrun migration)
+function fml_list_pending_migrate_aliases()
+{
+  local aliases=$(fml_list_all_aliases)
+  for alias in $aliases
+  do
+    local dir=$(fml_conf_var $alias "directory")
+    if [[ -n "$dir" && "$dir" != "null" && -f "$dir/.mlaunch_startup" && ! -f "$dir/.mrun_startup" ]]; then
+      echo $alias
+    fi
+  done
+}
+
 # Returns aliases that have not been initialized (i.e. have no existing directories)
 function fml_list_dir_not_exists_aliases()
 {
@@ -283,6 +296,60 @@ function fml_reinit()
 {
   fml_cleanup "$1"
   fml_init "$@"
+}
+
+# Migrate one cluster's data dir from mlaunch to mrun. The startup-file
+# schema is identical between the two tools, so this is just a rename.
+# Safe on a running cluster: mongod keeps running and the next fml
+# stop/start uses mrun against the renamed file.
+function fml_migrate_one()
+{
+  local alias="$1"
+  local dir=$(fml_conf_var $alias "directory")
+
+  if [[ -z "$dir" || "$dir" == "null" ]]; then
+    echo "Error: no directory configured for alias '$alias'" >&2
+    return 1
+  fi
+  if [[ ! -d "$dir" ]]; then
+    echo "Skipping '$alias': directory $dir does not exist"
+    return 0
+  fi
+  if [[ -f "$dir/.mrun_startup" ]]; then
+    echo "Skipping '$alias': already migrated (.mrun_startup exists in $dir)"
+    return 0
+  fi
+  if [[ ! -f "$dir/.mlaunch_startup" ]]; then
+    echo "Skipping '$alias': no .mlaunch_startup file in $dir"
+    return 0
+  fi
+
+  mv "$dir/.mlaunch_startup" "$dir/.mrun_startup"
+  echo "Migrated '$alias': $dir/.mlaunch_startup -> .mrun_startup"
+}
+
+function fml_migrate()
+{
+  if [[ -z "$1" ]]; then
+    echo "Error: alias required. Usage: fml migrate <alias> | fml migrate --all" >&2
+    return 1
+  fi
+
+  if [[ "$1" == "--all" ]]; then
+    local aliases=$(fml_list_all_aliases)
+    local migrated=0
+    for alias in $aliases; do
+      local dir=$(fml_conf_var $alias "directory")
+      if [[ -n "$dir" && "$dir" != "null" && -f "$dir/.mlaunch_startup" && ! -f "$dir/.mrun_startup" ]]; then
+        if fml_migrate_one "$alias"; then
+          migrated=$((migrated + 1))
+        fi
+      fi
+    done
+    echo "Done. Migrated $migrated alias(es)."
+  else
+    fml_migrate_one "$1"
+  fi
 }
 
 function fml_sh()
@@ -497,6 +564,11 @@ Available Commands:
       copy all databases and collections)
   export <alias> <db> <collection> <file>
       Calls mongoexport to export JSON data to file.
+  migrate <alias> | migrate --all
+      Migrates a cluster's data directory from mlaunch to mrun by renaming
+      .mlaunch_startup to .mrun_startup. The startup-file schema is identical
+      between the two tools, so no data is touched. Safe on running clusters.
+      Use --all to migrate every alias whose data dir still has .mlaunch_startup.
 EndOfHELP
 }
 
@@ -576,6 +648,9 @@ function fml()
   elif [ "$cmd" = "export" ]
   then
     fml_export "$@"
+  elif [ "$cmd" = "migrate" ]
+  then
+    fml_migrate "$@"
   elif [ "$cmd" = "help" ]
   then
     fml_help
@@ -591,6 +666,7 @@ takes_alias_already_init=("cleanup" "reinit")
 takes_running_alias=("stop")
 takes_stopped_alias=("start")
 takes_second_alias=("dump_restore" "sync")
+takes_pending_migrate_alias=("migrate")
 
 
 function fml_autocomplete()
@@ -600,7 +676,7 @@ function fml_autocomplete()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     prevprev="${COMP_WORDS[COMP_CWORD-2]}"
-    opts="help list config init start stop upgrade cleanup reinit sh oldsh eval oldeval dump restore dump_restore sync export"
+    opts="help list config init start stop upgrade cleanup reinit sh oldsh eval oldeval dump restore dump_restore sync export migrate"
 
     if [[ ${prev} == "fml" ]] ; then
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
@@ -623,6 +699,10 @@ function fml_autocomplete()
       return 0
     elif [[ ${takes_stopped_alias[@]} =~ $prev ]] ; then
       local aliases=$(fml_list_stopped_aliases)
+      COMPREPLY=( $(compgen -W "${aliases}" -- ${cur}) )
+      return 0
+    elif [[ ${takes_pending_migrate_alias[@]} =~ $prev ]] ; then
+      local aliases="--all $(fml_list_pending_migrate_aliases)"
       COMPREPLY=( $(compgen -W "${aliases}" -- ${cur}) )
       return 0
     elif [[ ${takes_second_alias[@]} =~ $prevprev ]] ; then

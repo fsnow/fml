@@ -184,6 +184,21 @@ fml dump_restore mongodb://remote:27017 local_alias
 | `dump_restore <src> <dst>` | Dump from source, restore to destination |
 | `sync <src> <dst>` | Sync clusters using mongosync |
 | `export <alias> <db> <coll> <file>` | Export collection to JSON |
+| `migrate <alias>` / `migrate --all` | Migrate an existing mlaunch-initialized data directory to mrun |
+
+## Migrating from mlaunch
+
+If you have data directories that were initialized by mlaunch (the predecessor to mrun), run:
+
+```bash
+# One alias at a time
+fml migrate myproject
+
+# Or every pending alias
+fml migrate --all
+```
+
+This renames `.mlaunch_startup` to `.mrun_startup` in each data directory. The two tools use the same startup-file schema, so no data is touched and the migration is safe on a running cluster. After migrating, `fml start`/`stop`/etc. operate via mrun.
 
 ## Shell Autocompletion
 
