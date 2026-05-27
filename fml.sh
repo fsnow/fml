@@ -364,15 +364,6 @@ function fml_sh()
   mongosh $conn "$@"
 }
 
-function fml_oldsh()
-{
-  fml_start $1
-  local arg1="$1"
-  shift 1
-  local conn=$(fml_to_connection_string $arg1)
-  mongo $conn "$@"
-}
-
 function fml_eval()
 {
   fml_start $1
@@ -381,16 +372,6 @@ function fml_eval()
   shift 2
   local conn=$(fml_to_connection_string $arg1)
   mongosh --quiet --norc --eval "$ev" $conn "$@"
-}
-
-function fml_oldeval()
-{
-  fml_start $1
-  local arg1="$1"
-  local ev="$2"
-  shift 2
-  local conn=$(fml_to_connection_string $arg1)
-  mongo --quiet --norc --eval "$ev" $conn "$@"
 }
 
 function fml_dump()
@@ -430,61 +411,6 @@ function fml_config()
   jq . "$CONFIG"
 }
 
-function fml_sync()
-{
-  fml_start $1
-  fml_start $2
-
-  local arg1="$1"
-  local arg2="$2"
-  shift 2
-
-  local connstr0=$(fml_to_connection_string $arg1)
-  local connstr1=$(fml_to_connection_string $arg2)
-
-  local logfile="mongosync.log"
-  rm -rf $logfile
-  echo "Mongosync log file: $logfile"
-
-  local ver0="$(fml_eval $arg1 'db.version()')"
-  local ver1="$(fml_eval $arg2 'db.version()')"
-
-  local extra_msync_args=''
-  local extra_start_json=''
-  if [[ "$ver0" =~ ^[45] ]] || [[ "$ver1" =~ ^[45]  ]] 
-  then
-    extra_msync_args='--enableFeatures supportOlderVersions'
-    extra_start_json=', "supportOlderVersions": true'
-  fi
-
-  echo "extra_msync_args: $extra_msync_args"
-  echo "extra_start_json: $extra_start_json"
-
-  fml_sh $arg1 --quiet --norc --eval 'db.getSiblingDB("mongosync_reserved_for_internal_use").dropDatabase()'
-  fml_sh $arg2 --quiet --norc --eval 'db.getSiblingDB("mongosync_reserved_for_internal_use").dropDatabase()'
-
-  local pause_fn="$1"
-  shift 1
-
-  mongosync $extra_msync_args --cluster0 "$connstr0" --cluster1 "$connstr1" "$@" >$logfile 2>&1 &
-  msync_pid=$(psmsync | grep "$connstr0" | awk '{ print $2; }')
-  echo "Started mongosync with pid $msync_pid"
-
-  msync_wait_until '.progress.state=="IDLE"'
-  msync_start "$extra_start_json"
-  msync_wait_until '.progress.state=="RUNNING" and .progress.info=="change event application"'
-  msync_commit
-  echo "Killing mongosync with pid $msync_pid"
-  if [[ -n "$msync_pid" ]]; then
-    kill $msync_pid 2>/dev/null
-    sleep 2
-    kill -9 $msync_pid 2>/dev/null
-  fi
-  echo "Killed mongosync"
-
-  fml_sh $arg1 --quiet --norc --eval 'db.getSiblingDB("mongosync_reserved_for_internal_use").dropDatabase()'
-}
-
 function fml_export()
 {
   fml_start $1
@@ -508,8 +434,6 @@ following tools are already installed and available on the command line:
   m
   mrun
   mongosh
-  mongo
-  mongosync
   mongodump
   mongorestore
   mongoexport
@@ -541,16 +465,12 @@ Available Commands:
       Stops the cluster for an alias and deletes its data directory
   reinit <alias>
       Stops the cluster for an alias, deletes its data directory, then calls mrun init
-  sh <alias>                      
+  sh <alias>
       Starts a mongosh session for an alias
-  oldsh <alias>                   
-      Starts a mongo legacy shell session for an alias
-  eval <alias> <command to eval>                   
+  eval <alias> <command to eval>
       Evals a command in the mongosh shell.
       Example:
       fml eval myalias 'db.version'
-  oldeval <alias> <command to eval>                   
-      Evals a command in the mongo shell.
   dump <alias>               
       Calls mongodump with no parameters except the connection string
   restore <alias> <dbName> <gz file or directory>                
@@ -558,10 +478,6 @@ Available Commands:
   dump_restore <alias1> <alias2>               
       Calls mongodump to dump all databases from alias1 cluster to a temporary directory, 
       mongorestore of dump to alias2 cluster, deletes temp directory.
-  sync <alias1> <alias2>                    
-      Copies the data from alias1 cluster to alias2 cluster with mongosync.
-      (Work in progress. Does not work with all version combinations and can only 
-      copy all databases and collections)
   export <alias> <db> <collection> <file>
       Calls mongoexport to export JSON data to file.
   migrate <alias> | migrate --all
@@ -618,18 +534,9 @@ function fml()
   elif [ "$cmd" = "mongosh" ]
   then
     fml_sh "$@"
-  elif [ "$cmd" = "oldsh" ]
-  then
-    fml_oldsh "$@"
-  elif [ "$cmd" = "mongo" ]
-  then
-    fml_oldsh "$@"
   elif [ "$cmd" = "eval" ]
   then
     fml_eval "$@"
-  elif [ "$cmd" = "oldeval" ]
-  then
-    fml_oldeval "$@"
   elif [ "$cmd" = "dump" ]
   then
     fml_dump "$@"
@@ -642,9 +549,6 @@ function fml()
   elif [ "$cmd" = "config" ]
   then
     fml_config "$@"
-  elif [ "$cmd" = "sync" ]
-  then
-    fml_sync "$@"
   elif [ "$cmd" = "export" ]
   then
     fml_export "$@"
@@ -661,11 +565,11 @@ function fml()
 
 
 takes_no_dir_alias=("init")
-takes_alias_any_state=("sh" "oldsh" "eval" "restore" "dump" "dump_restore" "sync")
+takes_alias_any_state=("sh" "eval" "restore" "dump" "dump_restore")
 takes_alias_already_init=("cleanup" "reinit")
 takes_running_alias=("stop")
 takes_stopped_alias=("start")
-takes_second_alias=("dump_restore" "sync")
+takes_second_alias=("dump_restore")
 takes_pending_migrate_alias=("migrate")
 
 
@@ -676,7 +580,7 @@ function fml_autocomplete()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     prevprev="${COMP_WORDS[COMP_CWORD-2]}"
-    opts="help list config init start stop upgrade cleanup reinit sh oldsh eval oldeval dump restore dump_restore sync export migrate"
+    opts="help list config init start stop upgrade cleanup reinit sh eval dump restore dump_restore export migrate"
 
     if [[ ${prev} == "fml" ]] ; then
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
@@ -715,38 +619,6 @@ function fml_autocomplete()
 complete -F fml_autocomplete fml
 
 
-function msync_wait_until() 
-{
-  echo "Waiting for condition: $1"
-  while true
-  do
-    PROGRESS=$(curl -H "Content-Type: application/json" -X GET http://localhost:27182/api/v1/progress 2>/dev/null)
-    RESULT=$(echo $PROGRESS | jq "$1")
-    if [[ $RESULT == "true" ]]; then
-      break
-    fi
-    sleep 1
-  done
-  echo "Condition met"
-}
-
-function msync_start() 
-{
-  echo "Sending start command to mongosync"
-  local start_json='{"source": "cluster0", "destination": "cluster1"'
-  start_json+="$1"
-  start_json+='}'
-  curl http://localhost:27182/api/v1/start -X POST --data "$start_json"
-  echo ""
-}
-
-function msync_commit() 
-{
-  echo "Sending commit command to mongosync"
-  curl http://localhost:27182/api/v1/commit -X POST --data '{ }'
-  echo ""
-}
-
 function killmongod()
 {
   local pids=$(psgmd | awk '{ print $2; }')
@@ -770,21 +642,6 @@ function killmongos()
 function killmongo()
 {
   local pids=$(psgm | awk '{ print $2; }')
-  if [[ -n "$pids" ]]; then
-    kill $pids 2>/dev/null
-    sleep 2
-    kill -9 $pids 2>/dev/null
-  fi
-}
-
-function psmsync()
-{
-  ps -ef | grep mongosync-macos | grep -v grep
-}
-
-function killmongosync()
-{
-  local pids=$(ps -ef | grep mongosync-macos | grep -v grep | awk '{ print $2 }')
   if [[ -n "$pids" ]]; then
     kill $pids 2>/dev/null
     sleep 2

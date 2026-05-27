@@ -11,8 +11,6 @@
 - [mongosh](https://www.mongodb.com/docs/mongodb-shell/) - MongoDB shell
 
 ### Optional
-- `mongo` - Legacy MongoDB shell (for `oldsh` and `oldeval` commands)
-- `mongosync` - For the `sync` command
 - `mongodump` / `mongorestore` - For `dump`, `restore`, and `dump_restore` commands
 - `mongoexport` - For the `export` command
 
@@ -97,9 +95,6 @@ fml sh myproject
 
 # Run a quick eval command
 fml eval myproject 'db.version()'
-
-# Use legacy mongo shell
-fml oldsh myproject
 ```
 
 ### Manage Cluster Lifecycle
@@ -129,9 +124,6 @@ fml restore myproject --dir=/tmp/backup
 
 # Copy all data from one cluster to another
 fml dump_restore source_alias target_alias
-
-# Sync clusters using mongosync
-fml sync source_alias target_alias
 
 # Export a collection to JSON
 fml export myproject mydb mycollection /tmp/data.json
@@ -176,13 +168,10 @@ fml dump_restore mongodb://remote:27017 local_alias
 | `cleanup <alias>` | Stop cluster and delete data directory |
 | `reinit <alias>` | Cleanup and reinitialize cluster |
 | `sh <alias>` | Open mongosh session (auto-starts cluster) |
-| `oldsh <alias>` | Open legacy mongo shell session |
 | `eval <alias> <cmd>` | Evaluate command in mongosh |
-| `oldeval <alias> <cmd>` | Evaluate command in legacy shell |
 | `dump <alias> [args]` | Run mongodump |
 | `restore <alias> [args]` | Run mongorestore |
 | `dump_restore <src> <dst>` | Dump from source, restore to destination |
-| `sync <src> <dst>` | Sync clusters using mongosync |
 | `export <alias> <db> <coll> <file>` | Export collection to JSON |
 | `migrate <alias>` / `migrate --all` | Migrate an existing mlaunch-initialized data directory to mrun |
 
@@ -220,7 +209,6 @@ psgms   # mongos processes only
 killmongod    # Kill all mongod processes
 killmongos    # Kill all mongos processes
 killmongo     # Kill all MongoDB processes
-killmongosync # Kill mongosync process
 ```
 
 ## Environment Variables
