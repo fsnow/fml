@@ -22,17 +22,13 @@ Now uses `jq -r --arg k "$1" --arg f "$2" '.[$k][$f] // empty' "$CONFIG"`. Alias
 
 Now resolves the dir with `cd && pwd -P` and refuses if it resolves to `/`, `$HOME`, empty, or unresolvable. Also refuses when the configured value is literally `"null"` (jq's missing-key marker).
 
-### 5. `fml_stop` errors loudly if the cluster isn't running
+### 5. ~~`fml_stop` errors loudly if the cluster isn't running~~ DONE
 
-[fml.sh:237-240](fml.sh#L237-L240)
+Now short-circuits and returns 0 if `fml_is_running` is false.
 
-`fml_cleanup`/`fml_upgrade` call it unconditionally. Consider a quick `fml_is_running` check (once #1 is fixed).
+### 6. ~~Dep check ignores optional binaries~~ DONE
 
-### 6. Dep check ignores optional binaries
-
-[fml.sh:5-21](fml.sh#L5-L21)
-
-`fml dump` with no `mongodump` installed gets a `command not found` instead of the friendly "install missing dependencies" message. Either check per-subcommand, or expand the global list with a note that some are optional.
+Added a small `_fml_require <cmds...>` helper called at the top of `fml_dump`, `fml_restore`, `fml_dump_restore`, and `fml_export`. Produces a friendly `"required command(s) not found: ..."` message and returns 1 instead of letting bash emit `command not found`.
 
 ### 7. ~~No shebang~~ DONE
 

@@ -21,6 +21,23 @@ function fml_check_deps()
   return 0
 }
 
+# Per-subcommand dependency check. Subcommands that call optional
+# tools (mongodump/mongorestore/mongoexport) invoke this with their
+# extras to produce a friendly error if a tool is missing.
+function _fml_require()
+{
+  local missing=()
+  local cmd
+  for cmd in "$@"; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Error: required command(s) not found: ${missing[*]}" >&2
+    return 1
+  fi
+  return 0
+}
+
 # Validate config file exists and is valid JSON
 function fml_validate_config()
 {
@@ -230,6 +247,9 @@ function fml_start()
 
 function fml_stop()
 {
+  if ! fml_is_running "$1"; then
+    return 0
+  fi
   mrun stop --dir "$(fml_conf_var $1 directory)"
 }
 
@@ -391,6 +411,7 @@ function fml_eval()
 
 function fml_dump()
 {
+  _fml_require mongodump || return 1
   fml_start $1
   local arg1="$1"
   shift
@@ -400,6 +421,7 @@ function fml_dump()
 
 function fml_restore()
 {
+  _fml_require mongorestore || return 1
   fml_start $1
   local arg1="$1"
   shift 1
@@ -409,6 +431,7 @@ function fml_restore()
 
 function fml_dump_restore()
 {
+  _fml_require mongodump mongorestore || return 1
   fml_start $1
   fml_start $2
   local arg1="$1"
@@ -428,6 +451,7 @@ function fml_config()
 
 function fml_export()
 {
+  _fml_require mongoexport || return 1
   fml_start $1
   local arg1="$1"
   local db="$2"
