@@ -20,16 +20,9 @@ Two problems:
 
 Note: mrun now provides `mrun list --json --dir <dir>`, which would be a more robust source of truth than parsing `ps` output. Worth considering as part of the fix.
 
-### 2. `tmp.json` written in CWD by `fml_upgrade`
+### 2. ~~`tmp.json` written in CWD by `fml_upgrade`~~ DONE
 
-[fml.sh:266-269](fml.sh#L266-L269)
-
-```bash
-jq ... "$CONFIG" > tmp.json
-mv tmp.json "$CONFIG"
-```
-
-Fails if CWD isn't writable, and clobbers any existing `tmp.json`. Use `mktemp` (or write next to `$CONFIG`). Also, if `jq` succeeds but `mv` fails, you've lost the original — consider `cp "$CONFIG" "$CONFIG.bak"` first or write-and-rename atomically beside the config.
+Writes to a `mktemp` sibling of `$CONFIG`, cleans up on failure of either `jq` or `mv`.
 
 ### 3. `fml_conf_var` is jq-injection-prone
 
@@ -49,11 +42,9 @@ Also returns the literal string `"null"` for missing keys, which propagates sile
 
 ## Robustness
 
-### 4. `fml_delete_dir` guards empty but not `/` or `~`
+### 4. ~~`fml_delete_dir` guards empty but not `/` or `~`~~ DONE
 
-[fml.sh:275-287](fml.sh#L275-L287)
-
-A typo'd config (`"directory": "/"`) would `rm -rf /`. Worth a sanity check that the path is non-trivial (e.g. contains at least two non-empty segments, or is under a known base).
+Now resolves the dir with `cd && pwd -P` and refuses if it resolves to `/`, `$HOME`, empty, or unresolvable. Also refuses when the configured value is literally `"null"` (jq's missing-key marker).
 
 ### 5. `fml_stop` errors loudly if the cluster isn't running
 
@@ -97,10 +88,8 @@ The if/elif chain is still 50+ lines and has one alias (`mongosh` → `sh`) that
 
 ## Suggested priority
 
-Top three to fix first:
+Remaining top priority:
 
 - **#1** — port match is wrong and will misreport state
-- **#2** — `fml_upgrade` writes `tmp.json` into the cwd (data safety; can lose config on failure)
-- **#4** — `rm -rf` without path-sanity check (data safety)
 
 Everything else is polish or low-frequency edge cases.

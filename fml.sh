@@ -265,11 +265,21 @@ function fml_upgrade()
     sed -i "s/$ver/$2/g" "$dir/.mrun_startup"
   fi
 
-  if ! jq --arg key "$1" --arg version "$2" '.[$key].mongoVersion = $version' "$CONFIG" > tmp.json; then
+  local tmp_config
+  tmp_config=$(mktemp "${CONFIG}.XXXXXX") || {
+    echo "Error: failed to create temp file beside $CONFIG" >&2
+    return 1
+  }
+  if ! jq --arg key "$1" --arg version "$2" '.[$key].mongoVersion = $version' "$CONFIG" > "$tmp_config"; then
+    rm -f "$tmp_config"
     echo "Error: Failed to update config file" >&2
     return 1
   fi
-  mv tmp.json "$CONFIG"
+  if ! mv "$tmp_config" "$CONFIG"; then
+    rm -f "$tmp_config"
+    echo "Error: Failed to replace config file" >&2
+    return 1
+  fi
   echo "Upgraded $1 from $ver to $2"
 }
 
@@ -277,14 +287,25 @@ function fml_upgrade()
 function fml_delete_dir()
 {
   local dir=$(fml_conf_var $1 directory)
-  if [[ -z "$dir" ]]; then
+  if [[ -z "$dir" || "$dir" == "null" ]]; then
     echo "Error: No directory configured for alias '$1'" >&2
     return 1
   fi
-  if [[ -d "$dir" ]]; then
-    echo "Deleting directory: $dir"
-    rm -rf "$dir"
+  if [[ ! -d "$dir" ]]; then
+    return 0
   fi
+  # Refuse to delete obviously dangerous paths (typo defense)
+  local resolved
+  resolved=$(cd "$dir" && pwd -P) || {
+    echo "Error: cannot resolve '$dir'" >&2
+    return 1
+  }
+  if [[ -z "$resolved" || "$resolved" == "/" || "$resolved" == "$HOME" ]]; then
+    echo "Error: refusing to rm -rf '$dir' (resolves to '$resolved')" >&2
+    return 1
+  fi
+  echo "Deleting directory: $dir"
+  rm -rf "$dir"
 }
 
 function fml_cleanup()
