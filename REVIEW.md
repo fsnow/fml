@@ -67,9 +67,9 @@ A typo'd config (`"directory": "/"`) would `rm -rf /`. Worth a sanity check that
 
 `fml dump` with no `mongodump` installed gets a `command not found` instead of the friendly "install missing dependencies" message. Either check per-subcommand, or expand the global list with a note that some are optional.
 
-### 7. No shebang
+### 7. ~~No shebang~~ DONE
 
-[fml.sh:1](fml.sh#L1) is blank. The script is meant to be sourced (README is clear about this), but a `#!/usr/bin/env bash` header still helps editors/linters and signals bash-only constructs (`[[ ]]`, arrays).
+Added `#!/usr/bin/env bash` and a short purpose comment.
 
 ## Code quality
 
@@ -92,8 +92,8 @@ The if/elif chain is still 50+ lines and has one alias (`mongosh` → `sh`) that
 ## Nice-to-haves
 
 - [fml.sh:78](fml.sh#L78) and similar: echoing `"true"`/`"false"` and string-comparing is a common bash idiom but exit codes (`return 0`/`return 1`) are faster and idiomatic — `if fml_is_running "$alias"; then ...`.
-- README is solid, but one small gap: `FML_CONFIG` is documented but the `M_CONFIRM=0` side effect of `fml init` ([fml.sh:200](fml.sh#L200)) isn't — worth a one-line mention that it suppresses `m`'s confirm prompt for the rest of the shell.
-- `fml help` returns 0 when an unknown command is passed ([fml.sh:560-562](fml.sh#L560-L562)). Print to stderr and return non-zero so scripts can detect typos.
+- ~~README is solid, but one small gap: `FML_CONFIG` is documented but the `M_CONFIRM=0` side effect of `fml init` isn't.~~ DONE — added note in README.
+- ~~`fml help` returns 0 when an unknown command is passed.~~ DONE — now prints to stderr and returns 1.
 
 ## Suggested priority
 

@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+# fml — Fast MongoDB Launcher. Source this file from your shell profile.
 
 CONFIG=${FML_CONFIG:-~/fml/fml_config.json}
 
@@ -559,7 +561,9 @@ function fml()
   then
     fml_help
   else
+    echo "fml: unknown command '$cmd'" >&2
     fml_help
+    return 1
   fi
 }
 

@@ -216,3 +216,5 @@ killmongo     # Kill all MongoDB processes
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FML_CONFIG` | `~/fml/fml_config.json` | Path to configuration file |
+
+Note: `fml init` exports `M_CONFIRM=0` to suppress `m`'s install-confirmation prompt. The export persists for the rest of the shell session.
