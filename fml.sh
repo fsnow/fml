@@ -546,77 +546,43 @@ function fml()
   local cmd="$1"
   shift
 
-  if [ "$cmd" = "list" ]
-  then
-    fml_list_running_json
-  elif [ "$cmd" = "init" ]
-  then
-    fml_init "$@"
-  elif [ "$cmd" = "start" ]
-  then
-    fml_start "$@"
-  elif [ "$cmd" = "stop" ]
-  then
-    fml_stop "$@"
-  elif [ "$cmd" = "upgrade" ]
-  then
-    fml_upgrade "$@"
-  elif [ "$cmd" = "cleanup" ]
-  then
-    fml_cleanup "$@"
-  elif [ "$cmd" = "reinit" ]
-  then
-    fml_reinit "$@"
-  elif [ "$cmd" = "sh" ]
-  then
-    fml_sh "$@"
-  elif [ "$cmd" = "mongosh" ]
-  then
-    fml_sh "$@"
-  elif [ "$cmd" = "eval" ]
-  then
-    fml_eval "$@"
-  elif [ "$cmd" = "dump" ]
-  then
-    fml_dump "$@"
-  elif [ "$cmd" = "restore" ]
-  then
-    fml_restore "$@"
-  elif [ "$cmd" = "dump_restore" ]
-  then
-    fml_dump_restore "$@"
-  elif [ "$cmd" = "config" ]
-  then
-    fml_config "$@"
-  elif [ "$cmd" = "export" ]
-  then
-    fml_export "$@"
-  elif [ "$cmd" = "migrate" ]
-  then
-    fml_migrate "$@"
-  elif [ "$cmd" = "help" ]
-  then
-    fml_help
-  else
-    echo "fml: unknown command '$cmd'" >&2
-    fml_help
-    return 1
-  fi
+  case "$cmd" in
+    list)         fml_list_running_json ;;
+    init)         fml_init "$@" ;;
+    start)        fml_start "$@" ;;
+    stop)         fml_stop "$@" ;;
+    upgrade)      fml_upgrade "$@" ;;
+    cleanup)      fml_cleanup "$@" ;;
+    reinit)       fml_reinit "$@" ;;
+    sh|mongosh)   fml_sh "$@" ;;
+    eval)         fml_eval "$@" ;;
+    dump)         fml_dump "$@" ;;
+    restore)      fml_restore "$@" ;;
+    dump_restore) fml_dump_restore "$@" ;;
+    config)       fml_config "$@" ;;
+    export)       fml_export "$@" ;;
+    migrate)      fml_migrate "$@" ;;
+    help)         fml_help ;;
+    *)
+      echo "fml: unknown command '$cmd'" >&2
+      fml_help
+      return 1
+      ;;
+  esac
 }
-
-
-takes_no_dir_alias=("init")
-takes_alias_any_state=("sh" "eval" "restore" "dump" "dump_restore")
-takes_alias_already_init=("cleanup" "reinit")
-takes_running_alias=("stop")
-takes_stopped_alias=("start")
-takes_second_alias=("dump_restore")
-takes_pending_migrate_alias=("migrate")
 
 
 function fml_autocomplete()
 {
-    local cur prev opts
+    local cur prev prevprev opts
+    local takes_no_dir_alias=("init")
+    local takes_alias_any_state=("sh" "eval" "restore" "dump" "dump_restore")
+    local takes_alias_already_init=("cleanup" "reinit")
+    local takes_running_alias=("stop")
+    local takes_stopped_alias=("start")
+    local takes_second_alias=("dump_restore")
+    local takes_pending_migrate_alias=("migrate")
+
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
@@ -660,9 +626,10 @@ function fml_autocomplete()
 complete -F fml_autocomplete fml
 
 
-function killmongod()
+# SIGTERM, brief grace period, then SIGKILL for any leftover pids.
+function _fml_kill_pids()
 {
-  local pids=$(psgmd | awk '{ print $2; }')
+  local pids="$1"
   if [[ -n "$pids" ]]; then
     kill $pids 2>/dev/null
     sleep 2
@@ -670,23 +637,7 @@ function killmongod()
   fi
 }
 
-function killmongos()
-{
-  local pids=$(psgms | awk '{ print $2; }')
-  if [[ -n "$pids" ]]; then
-    kill $pids 2>/dev/null
-    sleep 2
-    kill -9 $pids 2>/dev/null
-  fi
-}
-
-function killmongo()
-{
-  local pids=$(psgm | awk '{ print $2; }')
-  if [[ -n "$pids" ]]; then
-    kill $pids 2>/dev/null
-    sleep 2
-    kill -9 $pids 2>/dev/null
-  fi
-}
+function killmongod() { _fml_kill_pids "$(psgmd | awk '{ print $2; }')"; }
+function killmongos() { _fml_kill_pids "$(psgms | awk '{ print $2; }')"; }
+function killmongo()  { _fml_kill_pids "$(psgm  | awk '{ print $2; }')"; }
 

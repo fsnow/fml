@@ -36,21 +36,17 @@ Added `#!/usr/bin/env bash` and a short purpose comment.
 
 ## Code quality
 
-### 8. Dispatcher should be a `case`
+### 8. ~~Dispatcher should be a `case`~~ DONE
 
-[fml.sh:491-563](fml.sh#L491-L563)
+Converted. `sh|mongosh)` collapses the alias to one line.
 
-The if/elif chain is still 50+ lines and has one alias (`mongosh` → `sh`) that a `case` with `|` patterns would express in one line.
+### 9. ~~Autocomplete arrays leak into global scope~~ DONE
 
-### 9. Autocomplete arrays leak into global scope
+Moved inside `fml_autocomplete` as `local` arrays. No more global `takes_*` variables after sourcing.
 
-[fml.sh:567-573](fml.sh#L567-L573)
+### 10. ~~Repeated kill-then-kill-9 pattern~~ DONE
 
-`takes_no_dir_alias`, etc. become globals when the script is sourced. Move them inside `fml_autocomplete` (or prefix with `_fml_`).
-
-### 10. Repeated kill-then-kill-9 pattern
-
-[fml.sh:622-650](fml.sh#L622-L650) — `killmongod`, `killmongos`, and `killmongo` all do the same three-line kill/sleep/kill-9. Could be a `_fml_kill_pids` helper.
+Added `_fml_kill_pids "$pids"` helper; the three killmongo* functions are now one-line wrappers around it.
 
 ## Nice-to-haves
 
