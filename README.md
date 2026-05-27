@@ -211,6 +211,17 @@ killmongos    # Kill all mongos processes
 killmongo     # Kill all MongoDB processes
 ```
 
+## Tests
+
+A bash-only test suite lives under [tests/](tests/). It exercises the
+pure-bash helpers (`fml_conf_var`, `_fml_running_ports`,
+`fml_delete_dir`, `fml_migrate_one`, dispatcher exit codes, etc.) with
+mocked process listings, so no real mongod is required.
+
+```bash
+bash tests/run.sh
+```
+
 ## Environment Variables
 
 | Variable | Default | Description |
