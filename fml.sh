@@ -63,39 +63,37 @@ function fml_conf_var()
   jq -r --arg k "$1" --arg f "$2" '.[$k][$f] // empty' "$CONFIG"
 }
 
-# Returns true if alias has been initialized, directory exists
-function fml_is_init()
+# Returns the unique --port values of every mongod/mongos started under m.
+# Single source of truth for "which ports are running" checks below.
+function _fml_running_ports()
 {
-  dir=$(fml_conf_var $1 "directory")
-  if [[ -d $dir ]] 
-  then
-    echo "true"
-  else
-    echo "false"
-  fi
+  psgm | sed -nE 's/.*--port ([0-9]+).*/\1/p' | sort -u
 }
 
+# Exit 0 if alias has been initialized (data dir exists), 1 otherwise.
+function fml_is_init()
+{
+  local dir
+  dir=$(fml_conf_var "$1" "directory")
+  [[ -n "$dir" && -d "$dir" ]]
+}
 
-# Returns true if alias is running
+# Exit 0 if alias's startPort matches a running mongod's --port, 1 otherwise.
 function fml_is_running()
 {
-  port=$(fml_conf_var $1 "startPort")
-  runningports=$(psgm | grep dbpath | awk '{ print $16 }' | uniq | sort)
-  if [[ ${runningports[@]} =~ $port ]] 
-  then
-    echo "true"
-  else
-    echo "false"
-  fi
+  local port
+  port=$(fml_conf_var "$1" "startPort")
+  [[ -z "$port" ]] && return 1
+  _fml_running_ports | grep -qx "$port"
 }
 
 # Returns full config for all running instances
 function fml_list_running_json()
 {
-  ports=$(psgm | grep "port" | sed -E 's/.*--port ([0-9]+).*/\1/' | uniq | sort)
-  for port in $ports
+  local port
+  for port in $(_fml_running_ports)
   do
-    jq -r "with_entries(select(.value.startPort == $port)) | select(length > 0)" "$CONFIG"
+    jq -r --argjson p "$port" 'with_entries(select(.value.startPort == $p)) | select(length > 0)' "$CONFIG"
   done
   echo ""
 }
@@ -103,10 +101,10 @@ function fml_list_running_json()
 # Returns aliases for all running instances
 function fml_list_running_aliases()
 {
-  ports=$(psgm | grep dbpath | awk '{ print $16 }' | uniq | sort)
-  for port in $ports
+  local port
+  for port in $(_fml_running_ports)
   do
-    jq -r "with_entries(select(.value.startPort == $port)) | keys[]" "$CONFIG"
+    jq -r --argjson p "$port" 'with_entries(select(.value.startPort == $p)) | keys[]' "$CONFIG"
   done
 }
 
@@ -116,10 +114,8 @@ function fml_list_stopped_aliases()
   local aliases=$(fml_list_all_aliases)
   for alias in $aliases
   do
-    local is_running=$(fml_is_running $alias)
-    if [[ $is_running == "false" ]]
-    then
-      echo $alias
+    if ! fml_is_running "$alias"; then
+      echo "$alias"
     fi
   done
 }
@@ -184,9 +180,7 @@ function fml_to_connection_string()
 
 function fml_init()
 {
-  local is_init=$(fml_is_init $1)
-  if [[ $is_init == "false" ]]
-  then
+  if ! fml_is_init "$1"; then
     local INIT_ARGS=$(fml_conf_var $1 initArgs)
     local DIR=$(fml_conf_var $1 directory)
     local MONGO_VER=$(fml_conf_var $1 mongoVersion)
@@ -227,9 +221,7 @@ function fml_start()
   if ! [[ $1 == mongodb://* ]] && ! [[ $1 == mongodb+srv://* ]]
   then
     fml_init $1
-    local is_running=$(fml_is_running $1)
-    if [[ $is_running == "false" ]]
-    then
+    if ! fml_is_running "$1"; then
       mrun start --dir "$(fml_conf_var $1 directory)"
       sleep 5
     fi

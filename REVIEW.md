@@ -4,21 +4,9 @@ Issues found during the initial code review (May 2026), saved here as a follow-u
 
 ## Bugs & correctness
 
-### 1. `fml_is_running` does substring port matching against the wrong column
+### 1. ~~`fml_is_running` does substring port matching against the wrong column~~ DONE
 
-[fml.sh:78-88](fml.sh#L78-L88)
-
-```bash
-runningports=$(psgm | grep dbpath | awk '{ print $16 }' | uniq | sort)
-if [[ ${runningports[@]} =~ $port ]]
-```
-
-Two problems:
-
-- `$16` is plucked from `ps -ef` output by column, which is fragile (varies by platform/mongod args). The next function ([fml.sh:91-99](fml.sh#L91-L99)) does the same thing differently via `sed -E 's/.*--port ([0-9]+).*/\1/'` — pick one approach.
-- `=~ $port` is a substring/regex match. If `startPort=2700`, it will match any running port containing "2700" (e.g. 27000, 27001, 12700). Use exact-match against a list, or `[[ " $runningports " == *" $port "* ]]`.
-
-Note: mrun now provides `mrun list --json --dir <dir>`, which would be a more robust source of truth than parsing `ps` output. Worth considering as part of the fix.
+Extracted a `_fml_running_ports` helper that pulls `--port N` from each mongod's args (single sed pipeline, no column counting), then `grep -qx` for exact match. Same fix also applied to `fml_list_running_aliases`, which had the same bug. `fml_list_running_json` already used the sed approach; routed it through the new helper too for consistency. Bonus: closed the related nice-to-have by switching `fml_is_init`/`fml_is_running` to exit-code idiom (`if fml_is_running x; then ...`).
 
 ### 2. ~~`tmp.json` written in CWD by `fml_upgrade`~~ DONE
 
@@ -70,14 +58,10 @@ The if/elif chain is still 50+ lines and has one alias (`mongosh` → `sh`) that
 
 ## Nice-to-haves
 
-- [fml.sh:78](fml.sh#L78) and similar: echoing `"true"`/`"false"` and string-comparing is a common bash idiom but exit codes (`return 0`/`return 1`) are faster and idiomatic — `if fml_is_running "$alias"; then ...`.
+- ~~Echo `"true"`/`"false"` instead of exit codes in `fml_is_init`/`fml_is_running`.~~ DONE — both now use exit codes, callers updated.
 - ~~README is solid, but one small gap: `FML_CONFIG` is documented but the `M_CONFIRM=0` side effect of `fml init` isn't.~~ DONE — added note in README.
 - ~~`fml help` returns 0 when an unknown command is passed.~~ DONE — now prints to stderr and returns 1.
 
 ## Suggested priority
 
-Remaining top priority:
-
-- **#1** — port match is wrong and will misreport state
-
-Everything else is polish or low-frequency edge cases.
+All top-priority items are resolved. Remaining items are polish or low-frequency edge cases.
