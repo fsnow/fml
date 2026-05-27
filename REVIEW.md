@@ -24,21 +24,9 @@ Note: mrun now provides `mrun list --json --dir <dir>`, which would be a more ro
 
 Writes to a `mktemp` sibling of `$CONFIG`, cleans up on failure of either `jq` or `mv`.
 
-### 3. `fml_conf_var` is jq-injection-prone
+### 3. ~~`fml_conf_var` is jq-injection-prone~~ DONE
 
-[fml.sh:61](fml.sh#L61)
-
-```bash
-jq -r ".$1.$2" "$CONFIG"
-```
-
-An alias with `.`, `[`, spaces, or special chars produces a broken jq filter. Use `jq --arg`:
-
-```bash
-jq -r --arg k "$1" --arg f "$2" '.[$k][$f]' "$CONFIG"
-```
-
-Also returns the literal string `"null"` for missing keys, which propagates silently into downstream checks.
+Now uses `jq -r --arg k "$1" --arg f "$2" '.[$k][$f] // empty' "$CONFIG"`. Aliases with dots, spaces, or other special chars work correctly, and missing keys produce empty string instead of the literal `"null"`. The dead `"null"` checks added defensively in earlier commits were removed.
 
 ## Robustness
 

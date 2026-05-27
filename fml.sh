@@ -56,11 +56,11 @@ function psgms()
 
 # fml functions start here
 
-# params are config name, e.g. customer1, and variable name, e.g. "directory"
+# params are config name (e.g. customer1) and variable name (e.g. "directory").
+# Returns empty string if the alias or field is missing.
 function fml_conf_var()
 {
-  # jq -r returns the values without quotes
-  jq -r ".$1.$2" "$CONFIG"
+  jq -r --arg k "$1" --arg f "$2" '.[$k][$f] // empty' "$CONFIG"
 }
 
 # Returns true if alias has been initialized, directory exists
@@ -152,7 +152,7 @@ function fml_list_pending_migrate_aliases()
   for alias in $aliases
   do
     local dir=$(fml_conf_var $alias "directory")
-    if [[ -n "$dir" && "$dir" != "null" && -f "$dir/.mlaunch_startup" && ! -f "$dir/.mrun_startup" ]]; then
+    if [[ -n "$dir" && -f "$dir/.mlaunch_startup" && ! -f "$dir/.mrun_startup" ]]; then
       echo $alias
     fi
   done
@@ -287,7 +287,7 @@ function fml_upgrade()
 function fml_delete_dir()
 {
   local dir=$(fml_conf_var $1 directory)
-  if [[ -z "$dir" || "$dir" == "null" ]]; then
+  if [[ -z "$dir" ]]; then
     echo "Error: No directory configured for alias '$1'" >&2
     return 1
   fi
@@ -330,7 +330,7 @@ function fml_migrate_one()
   local alias="$1"
   local dir=$(fml_conf_var $alias "directory")
 
-  if [[ -z "$dir" || "$dir" == "null" ]]; then
+  if [[ -z "$dir" ]]; then
     echo "Error: no directory configured for alias '$alias'" >&2
     return 1
   fi
@@ -363,7 +363,7 @@ function fml_migrate()
     local migrated=0
     for alias in $aliases; do
       local dir=$(fml_conf_var $alias "directory")
-      if [[ -n "$dir" && "$dir" != "null" && -f "$dir/.mlaunch_startup" && ! -f "$dir/.mrun_startup" ]]; then
+      if [[ -n "$dir" && -f "$dir/.mlaunch_startup" && ! -f "$dir/.mrun_startup" ]]; then
         if fml_migrate_one "$alias"; then
           migrated=$((migrated + 1))
         fi
