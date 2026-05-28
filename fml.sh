@@ -253,17 +253,56 @@ function fml_stop()
   mrun stop --dir "$(fml_conf_var $1 directory)"
 }
 
-function fml_upgrade()
+# Locally installed MongoDB versions, one per line, ascending order.
+# Pre-releases (anything containing '-') are filtered out.
+function _fml_installed_versions()
 {
-  if [[ -z "$2" ]]; then
-    echo "Error: New version required. Usage: fml upgrade <alias> <new_version>" >&2
+  m 2>/dev/null | awk '{print $NF}' | grep -v -- '-' | sort -V
+}
+
+# Highest installed version matching the given glob policy ('*', '8.*', '8.3.*', exact).
+# Echoes empty string if no installed version matches.
+function _fml_latest_matching_policy()
+{
+  local policy="$1"
+  local v latest=""
+  while IFS= read -r v; do
+    [[ -z "$v" ]] && continue
+    [[ "$v" == $policy ]] && latest="$v"
+  done < <(_fml_installed_versions)
+  echo "$latest"
+}
+
+# Aliases whose config defines a non-empty upgradePolicy.
+function fml_list_policy_aliases()
+{
+  local aliases=$(fml_list_all_aliases)
+  for alias in $aliases
+  do
+    local policy=$(fml_conf_var "$alias" "upgradePolicy")
+    [[ -n "$policy" ]] && echo "$alias"
+  done
+}
+
+# Perform the actual version-bump for one alias to one concrete version.
+# Stops the cluster, ensures the binary is installed via m, rewrites
+# .mrun_startup and the fml config.
+function _fml_upgrade_to()
+{
+  local alias="$1"
+  local new_ver="$2"
+
+  export M_CONFIRM=0
+  echo "Ensuring MongoDB $new_ver is installed..."
+  if ! m "$new_ver" >/dev/null 2>&1; then
+    echo "Error: failed to install MongoDB $new_ver via m" >&2
     return 1
   fi
 
-  fml_stop "$1"
+  fml_stop "$alias"
   sleep 10
-  local dir=$(fml_conf_var $1 directory)
-  local ver=$(fml_conf_var $1 mongoVersion)
+  local dir=$(fml_conf_var "$alias" directory)
+  local ver=$(fml_conf_var "$alias" mongoVersion)
 
   if [[ ! -f "$dir/.mrun_startup" ]]; then
     echo "Error: mrun startup file not found: $dir/.mrun_startup" >&2
@@ -272,9 +311,9 @@ function fml_upgrade()
 
   # Portable sed -i for both macOS and Linux
   if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' "s/$ver/$2/g" "$dir/.mrun_startup"
+    sed -i '' "s/$ver/$new_ver/g" "$dir/.mrun_startup"
   else
-    sed -i "s/$ver/$2/g" "$dir/.mrun_startup"
+    sed -i "s/$ver/$new_ver/g" "$dir/.mrun_startup"
   fi
 
   local tmp_config
@@ -282,7 +321,7 @@ function fml_upgrade()
     echo "Error: failed to create temp file beside $CONFIG" >&2
     return 1
   }
-  if ! jq --arg key "$1" --arg version "$2" '.[$key].mongoVersion = $version' "$CONFIG" > "$tmp_config"; then
+  if ! jq --arg key "$alias" --arg version "$new_ver" '.[$key].mongoVersion = $version' "$CONFIG" > "$tmp_config"; then
     rm -f "$tmp_config"
     echo "Error: Failed to update config file" >&2
     return 1
@@ -292,7 +331,89 @@ function fml_upgrade()
     echo "Error: Failed to replace config file" >&2
     return 1
   fi
-  echo "Upgraded $1 from $ver to $2"
+  echo "Upgraded $alias from $ver to $new_ver"
+}
+
+# Read upgradePolicy from config, resolve to a concrete version, and
+# upgrade if newer than current. No-op (with message) when already at
+# the latest matching version.
+function _fml_upgrade_by_policy()
+{
+  local alias="$1"
+  local policy
+  policy=$(fml_conf_var "$alias" "upgradePolicy")
+  if [[ -z "$policy" ]]; then
+    echo "Error: alias '$alias' has no upgradePolicy. Use 'fml upgrade $alias <version>' to upgrade explicitly." >&2
+    return 1
+  fi
+
+  local latest
+  latest=$(_fml_latest_matching_policy "$policy")
+  if [[ -z "$latest" ]]; then
+    echo "Error: no installed version matches policy '$policy' for alias '$alias'" >&2
+    echo "  Installed (non-RC): $(_fml_installed_versions | tr '\n' ' ')" >&2
+    return 1
+  fi
+
+  local current
+  current=$(fml_conf_var "$alias" "mongoVersion")
+  if [[ "$current" == "$latest" ]]; then
+    echo "'$alias': already at latest matching policy '$policy' ($current)"
+    return 0
+  fi
+
+  # Defensive: if current > latest (e.g. a binary was uninstalled),
+  # don't silently "downgrade".
+  local highest
+  highest=$(printf "%s\n%s\n" "$current" "$latest" | sort -V | tail -1)
+  if [[ "$highest" == "$current" ]]; then
+    echo "'$alias': current $current is newer than highest installed match $latest for policy '$policy'. Skipping."
+    return 0
+  fi
+
+  echo "'$alias': upgrading $current -> $latest (policy '$policy')"
+  _fml_upgrade_to "$alias" "$latest"
+}
+
+# For each alias with an upgradePolicy, run the policy upgrade.
+function _fml_upgrade_all()
+{
+  local ok=0 skipped=0 failed=0
+  local alias policy
+  for alias in $(fml_list_all_aliases)
+  do
+    policy=$(fml_conf_var "$alias" "upgradePolicy")
+    if [[ -z "$policy" ]]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+    if _fml_upgrade_by_policy "$alias"; then
+      ok=$((ok + 1))
+    else
+      failed=$((failed + 1))
+    fi
+  done
+  echo
+  echo "fml upgrade --all: $ok handled, $skipped skipped (no policy), $failed failed"
+  (( failed > 0 )) && return 1
+  return 0
+}
+
+function fml_upgrade()
+{
+  if [[ -z "${1:-}" ]]; then
+    echo "Error: usage: fml upgrade <alias> [<version>] | fml upgrade --all" >&2
+    return 1
+  fi
+  if [[ "$1" == "--all" ]]; then
+    _fml_upgrade_all
+    return $?
+  fi
+  if [[ -z "${2:-}" ]]; then
+    _fml_upgrade_by_policy "$1"
+    return $?
+  fi
+  _fml_upgrade_to "$1" "$2"
 }
 
 # param is cluster alias, e.g. myproject
@@ -365,7 +486,7 @@ function fml_migrate_one()
 
 function fml_migrate()
 {
-  if [[ -z "$1" ]]; then
+  if [[ -z "${1:-}" ]]; then
     echo "Error: alias required. Usage: fml migrate <alias> | fml migrate --all" >&2
     return 1
   fi
@@ -499,7 +620,17 @@ Available Commands:
   stop <alias>
       Calls mrun stop for an alias
   upgrade <alias> <new version>
-      Updates the mrun startup file and fml config file for a patch version upgrade
+      Upgrades the cluster to an explicit MongoDB version. Ensures the binary
+      is installed via m, rewrites .mrun_startup, and updates the fml config.
+  upgrade <alias>
+      Reads the alias's upgradePolicy from the fml config, finds the highest
+      installed MongoDB version matching it (via m), and upgrades to that.
+      No-op if already at the latest matching version.
+  upgrade --all
+      Runs the policy-based upgrade for every alias with an upgradePolicy.
+      Aliases without a policy are silently skipped.
+      Policy glob: "*" any installed version, "8.*" any installed 8.x,
+                   "8.3.*" any installed 8.3 patch, "8.3.5" exact pin.
   cleanup <alias>
       Stops the cluster for an alias and deletes its data directory
   reinit <alias>
@@ -582,6 +713,7 @@ function fml_autocomplete()
     local takes_stopped_alias=("start")
     local takes_second_alias=("dump_restore")
     local takes_pending_migrate_alias=("migrate")
+    local takes_upgrade_target=("upgrade")
 
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
@@ -614,6 +746,10 @@ function fml_autocomplete()
       return 0
     elif [[ ${takes_pending_migrate_alias[@]} =~ $prev ]] ; then
       local aliases="--all $(fml_list_pending_migrate_aliases)"
+      COMPREPLY=( $(compgen -W "${aliases}" -- ${cur}) )
+      return 0
+    elif [[ ${takes_upgrade_target[@]} =~ $prev ]] ; then
+      local aliases="--all $(fml_list_all_aliases)"
       COMPREPLY=( $(compgen -W "${aliases}" -- ${cur}) )
       return 0
     elif [[ ${takes_second_alias[@]} =~ $prevprev ]] ; then

@@ -257,6 +257,132 @@ test_dispatcher_exit_codes() {
   rm -rf "$tmp"
 }
 
+test_installed_versions() {
+  echo "## _fml_installed_versions (parses m, strips marker, filters RCs, sorts -V)"
+  (
+    source "$FML_PATH"
+    # Mock `m` (no args) — typical output: indented, active marked with ✔
+    m() {
+      cat <<'EOF'
+    8.0.23
+  ✔ 8.2.9
+    8.3.2
+    8.4.0-rc1
+EOF
+    }
+    local got
+    got=$(_fml_installed_versions | tr '\n' ' ' | sed 's/ $//')
+    assert_eq "stripped, sorted, RCs filtered" "8.0.23 8.2.9 8.3.2" "$got"
+  )
+}
+
+test_latest_matching_policy() {
+  echo "## _fml_latest_matching_policy (glob -> highest installed match)"
+  (
+    source "$FML_PATH"
+    m() {
+      cat <<'EOF'
+    8.0.10
+    8.0.23
+    8.2.9
+    8.3.0
+    8.3.2
+    9.0.1
+EOF
+    }
+    assert_eq "*"      "9.0.1"  "$(_fml_latest_matching_policy '*')"
+    assert_eq "8.*"    "8.3.2"  "$(_fml_latest_matching_policy '8.*')"
+    assert_eq "8.3.*"  "8.3.2"  "$(_fml_latest_matching_policy '8.3.*')"
+    assert_eq "8.0.*"  "8.0.23" "$(_fml_latest_matching_policy '8.0.*')"
+    assert_eq "9.*"    "9.0.1"  "$(_fml_latest_matching_policy '9.*')"
+    assert_eq "10.*"   ""       "$(_fml_latest_matching_policy '10.*')"
+    assert_eq "exact"  "8.2.9"  "$(_fml_latest_matching_policy '8.2.9')"
+    assert_eq "no exact" ""     "$(_fml_latest_matching_policy '8.2.10')"
+  )
+}
+
+test_upgrade_policy_paths() {
+  echo "## fml_upgrade <alias> (1-arg policy form)"
+  local tmp; tmp=$(new_config)
+  mkdir -p "$tmp/a"
+  echo '{"protocol_version":2,"mongo_version":"8.3.1"}' > "$tmp/a/.mrun_startup"
+  cat > "$tmp/cfg.json" <<EOF
+{
+  "noPolicy":  {"directory": "$tmp/a", "startPort": 27000, "mongoVersion": "8.3.1"},
+  "atLatest":  {"directory": "$tmp/a", "startPort": 27000, "mongoVersion": "8.3.2", "upgradePolicy": "8.3.*"},
+  "needsBump": {"directory": "$tmp/a", "startPort": 27000, "mongoVersion": "8.3.1", "upgradePolicy": "8.3.*"},
+  "noMatch":   {"directory": "$tmp/a", "startPort": 27000, "mongoVersion": "7.0.0", "upgradePolicy": "10.*"}
+}
+EOF
+  (
+    export FML_CONFIG="$tmp/cfg.json"
+    source "$FML_PATH"
+    # Mock m: 0 args -> list installed; with args -> install no-op.
+    m() {
+      if [[ $# -eq 0 ]]; then
+        cat <<'EOF'
+    8.3.1
+    8.3.2
+EOF
+      fi
+    }
+    fml_stop() { :; }
+    sleep()    { :; }
+
+    fml_upgrade noPolicy >/dev/null 2>&1
+    assert_eq "noPolicy → exit 1"        "1" "$?"
+
+    fml_upgrade atLatest >/dev/null 2>&1
+    assert_eq "already-at-latest exit 0" "0" "$?"
+    assert_eq "atLatest unchanged"       "8.3.2" "$(jq -r '.atLatest.mongoVersion' "$FML_CONFIG")"
+
+    fml_upgrade noMatch >/dev/null 2>&1
+    assert_eq "noMatch → exit 1"         "1" "$?"
+
+    fml_upgrade needsBump >/dev/null 2>&1
+    assert_eq "needsBump exit 0"         "0" "$?"
+    assert_eq "needsBump bumped 8.3.1→8.3.2" "8.3.2" "$(jq -r '.needsBump.mongoVersion' "$FML_CONFIG")"
+  )
+  rm -rf "$tmp"
+}
+
+test_upgrade_all() {
+  echo "## fml upgrade --all (iterates aliases with policy, skips others)"
+  local tmp; tmp=$(new_config)
+  mkdir -p "$tmp/a" "$tmp/b" "$tmp/c"
+  echo '{"protocol_version":2}' > "$tmp/a/.mrun_startup"
+  echo '{"protocol_version":2}' > "$tmp/b/.mrun_startup"
+  echo '{"protocol_version":2}' > "$tmp/c/.mrun_startup"
+  cat > "$tmp/cfg.json" <<EOF
+{
+  "pinned":    {"directory": "$tmp/a", "mongoVersion": "8.2.5"},
+  "tracked82": {"directory": "$tmp/b", "mongoVersion": "8.2.5", "upgradePolicy": "8.2.*"},
+  "tracked83": {"directory": "$tmp/c", "mongoVersion": "8.3.1", "upgradePolicy": "8.3.*"}
+}
+EOF
+  (
+    export FML_CONFIG="$tmp/cfg.json"
+    source "$FML_PATH"
+    m() {
+      if [[ $# -eq 0 ]]; then
+        cat <<'EOF'
+    8.2.9
+    8.3.2
+EOF
+      fi
+    }
+    fml_stop() { :; }
+    sleep()    { :; }
+
+    fml_upgrade --all >/dev/null 2>&1
+    assert_eq "--all exit 0"          "0" "$?"
+    assert_eq "pinned unchanged"      "8.2.5" "$(jq -r '.pinned.mongoVersion'    "$FML_CONFIG")"
+    assert_eq "tracked82 → 8.2.9"     "8.2.9" "$(jq -r '.tracked82.mongoVersion' "$FML_CONFIG")"
+    assert_eq "tracked83 → 8.3.2"     "8.3.2" "$(jq -r '.tracked83.mongoVersion' "$FML_CONFIG")"
+  )
+  rm -rf "$tmp"
+}
+
 test_autocomplete_no_globals() {
   echo "## fml_autocomplete (#9 no global leakage)"
   local tmp; tmp=$(new_config)
@@ -291,6 +417,10 @@ main() {
   test_running_ports_extraction
   test_fml_migrate_one
   test_fml_upgrade_atomic_write
+  test_installed_versions
+  test_latest_matching_policy
+  test_upgrade_policy_paths
+  test_upgrade_all
   test_dispatcher_exit_codes
   test_autocomplete_no_globals
 

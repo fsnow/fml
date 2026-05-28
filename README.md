@@ -45,6 +45,15 @@ fml uses a JSON configuration file located at `~/fml/fml_config.json` by default
     "initArgs": "--replicaset --sharded 2",
     "connectionString": "mongodb://localhost:27100",
     "comment": "Sharded cluster with 2 shards"
+  },
+  "test_latest": {
+    "directory": "mlaunchdata/test_latest",
+    "startPort": 27200,
+    "mongoVersion": "8.3.2",
+    "upgradePolicy": "*",
+    "initArgs": "--single",
+    "connectionString": "mongodb://localhost:27200",
+    "comment": "Tracks the latest installed MongoDB across all majors"
   }
 }
 ```
@@ -58,7 +67,36 @@ fml uses a JSON configuration file located at `~/fml/fml_config.json` by default
 | `mongoVersion` | MongoDB version to install and use |
 | `initArgs` | Arguments passed to `mrun init` (e.g., `--replicaset`, `--single`, `--sharded N`) |
 | `connectionString` | MongoDB connection string for the cluster |
+| `upgradePolicy` | Optional. Glob constraining `fml upgrade <alias>` (1-arg form) and `fml upgrade --all`. See below. |
 | `comment` | Optional description of the instance |
+
+### Auto-upgrade policy (`upgradePolicy`)
+
+`fml upgrade <alias>` and `fml upgrade --all` look up the highest **installed**
+MongoDB version that matches the alias's `upgradePolicy` and upgrade to it.
+"Installed" means what `m` shows on this machine — fml will never pick a
+version `m` doesn't have, so the binaries you maintain are the candidate set.
+
+| Pattern | Matches |
+|---------|---------|
+| `"*"` | Any installed version (cross-major bumps allowed) |
+| `"8.*"` | Any installed 8.x.y (cross-minor within major 8) |
+| `"8.3.*"` | Any installed 8.3 patch |
+| `"8.3.5"` | Exact pin (no auto-upgrade) |
+| field omitted | No auto-upgrade; `fml upgrade <alias>` errors. Use the 2-arg `fml upgrade <alias> <version>` form. |
+
+Pre-releases (versions containing `-`, e.g. `8.4.0-rc1`) are always excluded
+from auto-selection. You can still pin to one with the explicit 2-arg form.
+
+The typical flow on a machine that auto-upgrades:
+
+```bash
+# Keep the m-managed binaries fresh (your existing daily script)
+m 8.2 && m 8.3 && m 9.0
+
+# Roll fml-managed clusters forward to match
+fml upgrade --all
+```
 
 ## Installation
 
@@ -164,7 +202,8 @@ fml dump_restore mongodb://remote:27017 local_alias
 | `init <alias>` | Install MongoDB version and create cluster with mrun |
 | `start <alias>` | Start an existing cluster |
 | `stop <alias>` | Stop a running cluster |
-| `upgrade <alias> <version>` | Upgrade MongoDB version in-place |
+| `upgrade <alias> <version>` | Upgrade MongoDB version in-place (explicit) |
+| `upgrade <alias>` / `upgrade --all` | Upgrade via `upgradePolicy` (see above) |
 | `cleanup <alias>` | Stop cluster and delete data directory |
 | `reinit <alias>` | Cleanup and reinitialize cluster |
 | `sh <alias>` | Open mongosh session (auto-starts cluster) |
