@@ -383,6 +383,44 @@ EOF
   rm -rf "$tmp"
 }
 
+test_resolve_config() {
+  echo "## _fml_resolve_config (override -> XDG -> legacy fallback)"
+  local tmp; tmp=$(new_config)
+  mkdir -p "$tmp/xdg/fml" "$tmp/home/fml" "$tmp/home/.config/fml"
+  (
+    # Isolate HOME/XDG so the real machine's files don't interfere.
+    export HOME="$tmp/home"
+    unset XDG_CONFIG_HOME
+    unset FML_CONFIG
+    source "$FML_PATH"
+
+    # 1. FML_CONFIG wins outright, even if it doesn't exist on disk.
+    FML_CONFIG="/explicit/path.json" \
+      assert_eq "explicit FML_CONFIG override" "/explicit/path.json" "$(FML_CONFIG=/explicit/path.json _fml_resolve_config)"
+
+    # 2. No files anywhere -> default to the XDG path (for first-run errors).
+    rm -f "$tmp/home/.config/fml/config.json" "$tmp/home/fml/fml_config.json"
+    assert_eq "default to XDG when nothing exists" \
+      "$tmp/home/.config/fml/config.json" "$(_fml_resolve_config)"
+
+    # 3. Only legacy exists -> use legacy.
+    echo '{}' > "$tmp/home/fml/fml_config.json"
+    assert_eq "legacy fallback when only legacy exists" \
+      "$tmp/home/fml/fml_config.json" "$(_fml_resolve_config)"
+
+    # 4. Both exist -> XDG wins.
+    echo '{}' > "$tmp/home/.config/fml/config.json"
+    assert_eq "XDG preferred over legacy" \
+      "$tmp/home/.config/fml/config.json" "$(_fml_resolve_config)"
+
+    # 5. XDG_CONFIG_HOME is honored.
+    echo '{}' > "$tmp/xdg/fml/config.json"
+    assert_eq "XDG_CONFIG_HOME honored" \
+      "$tmp/xdg/fml/config.json" "$(XDG_CONFIG_HOME=$tmp/xdg _fml_resolve_config)"
+  )
+  rm -rf "$tmp"
+}
+
 test_autocomplete_no_globals() {
   echo "## fml_autocomplete (#9 no global leakage)"
   local tmp; tmp=$(new_config)
@@ -422,6 +460,7 @@ main() {
   test_upgrade_policy_paths
   test_upgrade_all
   test_dispatcher_exit_codes
+  test_resolve_config
   test_autocomplete_no_globals
 
   local passed=0 failed=0

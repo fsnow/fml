@@ -1,7 +1,29 @@
 #!/usr/bin/env bash
 # fml — Fast MongoDB Launcher. Source this file from your shell profile.
 
-CONFIG=${FML_CONFIG:-~/fml/fml_config.json}
+# Resolve the config path. Precedence:
+#   1. $FML_CONFIG, if set (explicit override)
+#   2. $XDG_CONFIG_HOME/fml/config.json (default ~/.config/fml/config.json)
+#   3. legacy ~/fml/fml_config.json, if it still exists
+#   4. otherwise the XDG path (so first-run errors point at the new location)
+function _fml_resolve_config()
+{
+  if [[ -n "${FML_CONFIG:-}" ]]; then
+    echo "$FML_CONFIG"
+    return
+  fi
+  local xdg="${XDG_CONFIG_HOME:-$HOME/.config}/fml/config.json"
+  local legacy="$HOME/fml/fml_config.json"
+  if [[ -f "$xdg" ]]; then
+    echo "$xdg"
+  elif [[ -f "$legacy" ]]; then
+    echo "$legacy"
+  else
+    echo "$xdg"
+  fi
+}
+
+CONFIG=$(_fml_resolve_config)
 
 # Check if required dependencies are installed
 function fml_check_deps()
@@ -660,7 +682,7 @@ EndOfHELP
 
 function fml()
 {
-  CONFIG=${FML_CONFIG:-~/fml/fml_config.json}
+  CONFIG=$(_fml_resolve_config)
 
   # Handle no arguments
   if [[ $# -eq 0 ]]; then

@@ -16,14 +16,26 @@
 
 ## Configuration
 
-fml uses a JSON configuration file located at `~/fml/fml_config.json` by default. You can override this by setting the `FML_CONFIG` environment variable.
+fml looks for its JSON configuration file in this order:
+
+1. `$FML_CONFIG`, if set (explicit override)
+2. `$XDG_CONFIG_HOME/fml/config.json` (defaults to `~/.config/fml/config.json`)
+3. The legacy `~/fml/fml_config.json`, if it still exists
+
+New installs should use `~/.config/fml/config.json`. The legacy path is still
+honored so existing machines keep working until you move their config over:
+
+```bash
+mkdir -p ~/.config/fml
+mv ~/fml/fml_config.json ~/.config/fml/config.json
+```
 
 ### Example Configuration
 
 ```json
 {
   "test7": {
-    "directory": "mlaunchdata/test7",
+    "directory": "mrundata/test7",
     "startPort": 27000,
     "mongoVersion": "7.0.9",
     "initArgs": "--replicaset",
@@ -31,7 +43,7 @@ fml uses a JSON configuration file located at `~/fml/fml_config.json` by default
     "comment": "Test replica set on MongoDB 7.0"
   },
   "standalone": {
-    "directory": "mlaunchdata/standalone",
+    "directory": "mrundata/standalone",
     "startPort": 27017,
     "mongoVersion": "6.0.15",
     "initArgs": "--single",
@@ -39,7 +51,7 @@ fml uses a JSON configuration file located at `~/fml/fml_config.json` by default
     "comment": "Single node for quick tests"
   },
   "sharded": {
-    "directory": "mlaunchdata/sharded",
+    "directory": "mrundata/sharded",
     "startPort": 27100,
     "mongoVersion": "7.0.9",
     "initArgs": "--replicaset --sharded 2",
@@ -47,7 +59,7 @@ fml uses a JSON configuration file located at `~/fml/fml_config.json` by default
     "comment": "Sharded cluster with 2 shards"
   },
   "test_latest": {
-    "directory": "mlaunchdata/test_latest",
+    "directory": "mrundata/test_latest",
     "startPort": 27200,
     "mongoVersion": "8.3.2",
     "upgradePolicy": "*",
@@ -265,6 +277,7 @@ bash tests/run.sh
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FML_CONFIG` | `~/fml/fml_config.json` | Path to configuration file |
+| `FML_CONFIG` | (see Configuration) | Explicit path to configuration file; overrides the default lookup |
+| `XDG_CONFIG_HOME` | `~/.config` | Base dir for the default config location (`$XDG_CONFIG_HOME/fml/config.json`) |
 
 Note: `fml init` exports `M_CONFIRM=0` to suppress `m`'s install-confirmation prompt. The export persists for the rest of the shell session.
